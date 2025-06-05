@@ -1,57 +1,4 @@
-#include "tokenizer.h"
-
-const char* token_type_to_string(token_type type) {
-    switch (type) {
-        case LEFT_PAREN:    return "LEFT_PAREN";
-        case RIGHT_PAREN:   return "RIGHT_PAREN";
-        case LEFT_BRACE:    return "LEFT_BRACE";
-        case RIGHT_BRACE:   return "RIGHT_BRACE";
-        case COMMA:         return "COMMA";
-        case DOT:           return "DOT";
-        case MINUS:         return "MINUS";
-        case PLUS:          return "PLUS";
-        case SEMICOLON:     return "SEMICOLON";
-        case STAR:          return "STAR";
-        case SLASH:         return "SLASH";
-        case EQUAL:         return "EQUAL";
-        case EQUAL_EQUAL:   return "EQUAL_EQUAL";
-        case STRING:        return "STRING";
-        case NUMBER:        return "NUMBER";
-        case TOKEN_EOF:     return "EOF";
-        case BANG:          return "BANG";
-        case BANG_EQUAL:    return "BANG_EQUAL";
-        case LESS:          return "LESS";
-        case LESS_EQUAL:    return "LESS_EQUAL";
-        case GREATER:       return "GREATER";
-        case GREATER_EQUAL: return "GREATER_EQUAL";                
-        case ERROR:         return "ERROR";
-        default:            return "UNKNOWN";
-    }
-}
-
-char *read_file_contents(const char *filename) {
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        fprintf(stderr, "Error reading file: %s\n", filename);
-        return NULL;
-    }
-
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    rewind(file);
-
-    char *buffer = malloc(size + 1);
-    if (!buffer) {
-        fprintf(stderr, "Memory allocation failed\n");
-        fclose(file);
-        return NULL;
-    }
-
-    fread(buffer, 1, size, file);
-    buffer[size] = '\0';
-    fclose(file);
-    return buffer;
-}
+#include "tokenizer_scanner.h"
 
 token make_token(token_type type) {
     token t;
@@ -59,16 +6,51 @@ token make_token(token_type type) {
     t.start = scn.start;
     t.length = (int)(scn.current - scn.start);
     t.line = scn.line;
+    
+    t.symbol = malloc(t.length + 1);
+    if (t.symbol) {
+        memcpy(t.symbol, scn.start, t.length);
+        t.symbol[t.length] = '\0';
+    }
+    
+    t.value = NULL;
+    return t;
+}
+
+token make_token_with_value(token_type type, const char *value) {
+    token t = make_token(type);
+    if (value) {
+        t.value = malloc(strlen(value) + 1);
+        if (t.value) {
+            strcpy(t.value, value);
+        }
+    }
     return t;
 }
 
 token error_token(const char *message) {
     token t;
     t.type = ERROR;
-    t.start = strdup(message);
-    t.length = (int)strlen(message);
+    t.start = NULL;
+    t.length = 0;
     t.line = scn.line;
+    t.symbol = malloc(strlen(message) + 1);
+    if (t.symbol) {
+        strcpy(t.symbol, message);
+    }
+    t.value = NULL;
     return t;
+}
+
+void free_token(token *t) {
+    if (t->symbol) {
+        free(t->symbol);
+        t->symbol = NULL;
+    }
+    if (t->value) {
+        free(t->value);
+        t->value = NULL;
+    }
 }
 
 token string_token() {
@@ -81,7 +63,18 @@ token string_token() {
 
     advance();
 
-    return make_token(STRING);
+    token t = make_token(STRING);
+    
+    if (t.length >= 2) {
+        int value_length = t.length - 2;
+        t.value = malloc(value_length + 1);
+        if (t.value) {
+            memcpy(t.value, scn.start + 1, value_length);
+            t.value[value_length] = '\0';
+        }
+    }
+
+    return t;
 }
 
 token number_token() {
@@ -91,70 +84,54 @@ token number_token() {
         advance();
     }
     
-    if (dot_count > 1) error_token("Not a Valid Number");
+    if (dot_count > 1) return error_token("Not a Valid Number");
 
-    return make_token(NUMBER);
+    token t = make_token(NUMBER);
+    
+    char temp[t.length + 1];
+    memcpy(temp, scn.start, t.length);
+    temp[t.length] = '\0';
+    double double_val = strtod(temp, NULL);
+    
+    char value_buffer[32];
+    if (double_val == (int)double_val) {
+        snprintf(value_buffer, sizeof(value_buffer), "%.0f.0", double_val);
+    } else {
+        snprintf(value_buffer, sizeof(value_buffer), "%g", double_val);
+    }
+    
+    t.value = malloc(strlen(value_buffer) + 1);
+    if (t.value) {
+        strcpy(t.value, value_buffer);
+    }
+
+    return t;
 }
 
-int main(int argc, char *argv[]) {
-    setbuf(stdout, NULL);
-    setbuf(stderr, NULL);
+token identifier_keyword_token() {
+    while (is_letter(peek()) || is_digit(peek()) || peek() == '_') advance();
+    size_t length = scn.current - scn.start;
 
-    if (argc < 3) {
-        fprintf(stderr, "Usage: ./your_program tokenize <filename>\n");
-        return 1;
+    switch (scn.start[0]) {
+        case 'a': if (length == 3 && memcmp(scn.start, "and", 3) == 0) return make_token(AND);
+        case 'c': if (length == 5 && memcmp(scn.start, "class", 5) == 0) return make_token(CLASS);
+        case 'e': if (length == 4 && memcmp(scn.start, "else", 4) == 0) return make_token(ELSE);
+        case 'f':
+            if (length == 5 && memcmp(scn.start, "false", 5) == 0) return make_token(FALSE);
+            if (length == 3 && memcmp(scn.start, "for", 3) == 0) return make_token(FOR);
+            if (length == 3 && memcmp(scn.start, "fun", 3) == 0) return make_token(FUN);
+        case 'i': if (length == 2 && memcmp(scn.start, "if", 2) == 0) return make_token(IF);
+        case 'n': if (length == 3 && memcmp(scn.start, "nil", 3) == 0) return make_token(NIL);
+        case 'o': if (length == 2 && memcmp(scn.start, "or", 2) == 0) return make_token(OR);
+        case 'p': if (length == 5 && memcmp(scn.start, "print", 5) == 0) return make_token(PRINT);
+        case 'r': if (length == 6 && memcmp(scn.start, "return", 6) == 0) return make_token(RETURN);
+        case 's': if (length == 5 && memcmp(scn.start, "super", 5) == 0) return make_token(SUPER);
+        case 't':
+            if (length == 4 && memcmp(scn.start, "this", 4) == 0) return make_token(THIS);
+            if (length == 4 && memcmp(scn.start, "true", 4) == 0) return make_token(TRUE);
+        case 'v': if (length == 3 && memcmp(scn.start, "var", 3) == 0) return make_token(VAR);
+        case 'w': if (length == 5 && memcmp(scn.start, "while", 5) == 0) return make_token(WHILE);
     }
 
-    const char *command = argv[1];
-    if (strcmp(command, "tokenize") != 0) {
-        fprintf(stderr, "Unknown command: %s\n", command);
-        return 1;
-    }
-
-    char *file_contents = read_file_contents(argv[2]);
-    if (!file_contents) return 1;
-
-    scanner_init(file_contents);
-    int exit_code = 0;
-
-    while (1) {
-        token t = scan_token();
-        if (t.type == TOKEN_EOF) {
-            printf("EOF  null\n");
-            break;
-        } else if (t.type == ERROR) {
-            fprintf(stderr, "[line %d] Error: %.*s\n", t.line, t.length, t.start);
-            exit_code = 65;
-        } else if (t.type == STRING) {
-            printf("%s %.*s %.*s\n", token_type_to_string(t.type), t.length, t.start, t.length - 2, t.start + 1);
-        } else if (t.type == NUMBER) {
-            
-            char temp[t.length + 1];
-            memcpy(temp, t.start, t.length);
-            temp[t.length] = '\0';
-            double double_val = strtod(temp, NULL);
-
-            if (double_val == (int)double_val) printf("%s %.*s %.0f.0\n", token_type_to_string(t.type), t.length, t.start, double_val);
-            else {
-                int i = strlen(temp) - 1;
-                while (i >= 0 && temp[i] == '0') {
-                    temp[i--] = '\0';
-                }
-                printf("%s %.*s %s\n", token_type_to_string(t.type), t.length, t.start, temp);
-            }
-        }
-        else {
-            printf("%s %.*s null\n", token_type_to_string(t.type), t.length, t.start);
-        }
-
-        fflush(stdout);
-    }
-
-    free(file_contents);
-    return exit_code;
+    return make_token(IDENTIFIER);
 }
-
-
-
-
-

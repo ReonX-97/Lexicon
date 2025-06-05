@@ -1,4 +1,4 @@
-#include "tokenizer.h"
+#include "tokenizer_scanner.h"
 
 void scanner_init(const char *source) {
     scn.start = source;
@@ -88,7 +88,8 @@ token scan_token() {
                 return error_token(message);
             }
             default:
-                if (is_digit(c)) return number_token();
+                if (is_letter(c) || c == '_') return identifier_keyword_token();
+                else if (is_digit(c)) return number_token();
                 break;
         }
     }

@@ -32,7 +32,26 @@ typedef enum {
 
     // Data Types
     STRING,
-    NUMBER
+    NUMBER,
+    IDENTIFIER,
+
+    //KEYWORDS
+    AND, 
+    CLASS, 
+    ELSE, 
+    FALSE, 
+    FOR, 
+    FUN, 
+    IF, 
+    NIL, 
+    OR, 
+    PRINT, 
+    RETURN, 
+    SUPER, 
+    THIS, 
+    TRUE, 
+    VAR, 
+    WHILE
 
 } token_type;
 
@@ -41,6 +60,8 @@ typedef struct {
     const char *start;
     int length;
     int line;
+    char *symbol;
+    char *value;
 } token;
 
 typedef struct {
@@ -49,7 +70,7 @@ typedef struct {
     int line;
 } scanner;
 
-scanner scn;
+extern scanner scn;
 
 char *read_file_contents(const char *filename);
 void scanner_init(const char *source);
@@ -59,10 +80,13 @@ char peek_next();
 int is_at_end();
 int match(char expected);
 token make_token(token_type type);
+token make_token_with_value(token_type type, const char *value);
 token error_token(const char *message);
 token scan_token();
 token string_token();
 token number_token();
+token identifier_keyword_token();
 const char* token_type_to_string(token_type type);
 int is_digit(char c);
 int is_letter(char c);
+void free_token(token *t);
