@@ -77,39 +77,68 @@ int main(int argc, char *argv[]) {
     setbuf(stderr, NULL);
 
     if (argc < 3) {
-        fprintf(stderr, "Usage: ./your_program tokenize <filename>\n");
+        fprintf(stderr, "Usage: ./your_program <command> <filename>\n");
         return 1;
     }
 
     const char *command = argv[1];
-    if (strcmp(command, "tokenize") != 0) {
+
+    if (strcmp(command, "tokenize") == 0) {
+        char *file_contents = read_file_contents(argv[2]);
+        if (!file_contents) return 1;
+
+        scanner_init(file_contents);
+        int exit_code = 0;
+
+        while (1) {
+            token t = scan_token();
+            if (t.type == TOKEN_EOF) {
+                printf("EOF  null\n");
+                break;
+            } else if (t.type == ERROR) {
+                fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
+                exit_code = 65;
+            }
+            else {
+                printf("%s %s %s\n", token_type_to_string(t.type), t.symbol ? t.symbol : "null", t.value ? t.value : "null");
+            }
+
+            fflush(stdout);
+            free_token(&t);
+        }
+
+        free(file_contents);
+        return exit_code;
+    } else if (strcmp(command, "parse") == 0) {
+        char *file_contents = read_file_contents(argv[2]);
+        if (!file_contents) return 1;
+
+        scanner_init(file_contents);
+        int exit_code = 0;
+
+        while (1) {
+            token t = scan_token();
+            if (t.type == TOKEN_EOF) {
+                printf("EOF  null\n");
+                break;
+            } else if (t.type == ERROR) {
+                fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
+                exit_code = 65;
+            }
+            else {
+                if (!t.value) printf("%s\n", t.symbol);
+                else printf("%s\n", t.value);
+            }
+
+            fflush(stdout);
+            free_token(&t);
+        }
+
+        free(file_contents);
+        return exit_code;
+        
+    } else {
         fprintf(stderr, "Unknown command: %s\n", command);
         return 1;
     }
-
-    char *file_contents = read_file_contents(argv[2]);
-    if (!file_contents) return 1;
-
-    scanner_init(file_contents);
-    int exit_code = 0;
-
-    while (1) {
-        token t = scan_token();
-        if (t.type == TOKEN_EOF) {
-            printf("EOF  null\n");
-            break;
-        } else if (t.type == ERROR) {
-            fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
-            exit_code = 65;
-        }
-        else {
-            printf("%s %s %s\n", token_type_to_string(t.type), t.symbol ? t.symbol : "null", t.value ? t.value : "null");
-        }
-
-        fflush(stdout);
-        free_token(&t);
-    }
-
-    free(file_contents);
-    return exit_code;
 }

@@ -83,26 +83,29 @@ token number_token() {
         if (peek() == '.') dot_count++;
         advance();
     }
-    
+
     if (dot_count > 1) return error_token("Not a Valid Number");
 
     token t = make_token(NUMBER);
-    
-    char temp[t.length + 1];
-    memcpy(temp, scn.start, t.length);
-    temp[t.length] = '\0';
-    double double_val = strtod(temp, NULL);
-    
-    char value_buffer[32];
-    if (double_val == (int)double_val) {
-        snprintf(value_buffer, sizeof(value_buffer), "%.0f.0", double_val);
+
+    char raw[t.length + 1];
+    memcpy(raw, scn.start, t.length);
+    raw[t.length] = '\0';
+
+    if (strchr(raw, '.')) {
+        int len = strlen(raw);
+        while (len > 0 && raw[len - 1] == '0') len--;
+        if (len > 0 && raw[len - 1] == '.') {
+            raw[len++] = '0';
+        }
+        raw[len] = '\0';
     } else {
-        snprintf(value_buffer, sizeof(value_buffer), "%g", double_val);
+        strcat(raw, ".0");
     }
-    
-    t.value = malloc(strlen(value_buffer) + 1);
+
+    t.value = malloc(strlen(raw) + 1);
     if (t.value) {
-        strcpy(t.value, value_buffer);
+        strcpy(t.value, raw);
     }
 
     return t;
