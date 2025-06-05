@@ -1,4 +1,4 @@
-#include "tokenizer_scanner.h"
+#include "parser.h"
 
 scanner scn;
 
@@ -52,6 +52,7 @@ char *read_file_contents(const char *filename) {
     FILE *file = fopen(filename, "r");
     if (!file) {
         fprintf(stderr, "Error reading file: %s\n", filename);
+        fflush(stderr);
         return NULL;
     }
 
@@ -62,6 +63,7 @@ char *read_file_contents(const char *filename) {
     char *buffer = malloc(size + 1);
     if (!buffer) {
         fprintf(stderr, "Memory allocation failed\n");
+        fflush(stderr);
         fclose(file);
         return NULL;
     }
@@ -78,6 +80,7 @@ int main(int argc, char *argv[]) {
 
     if (argc < 3) {
         fprintf(stderr, "Usage: ./your_program <command> <filename>\n");
+        fflush(stderr);
         return 1;
     }
 
@@ -88,7 +91,6 @@ int main(int argc, char *argv[]) {
         if (!file_contents) return 1;
 
         scanner_init(file_contents);
-        int exit_code = 0;
 
         while (1) {
             token t = scan_token();
@@ -97,7 +99,8 @@ int main(int argc, char *argv[]) {
                 break;
             } else if (t.type == ERROR) {
                 fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
-                exit_code = 65;
+                fflush(stderr);
+                exit(65);
             }
             else {
                 printf("%s %s %s\n", token_type_to_string(t.type), t.symbol ? t.symbol : "null", t.value ? t.value : "null");
@@ -108,37 +111,43 @@ int main(int argc, char *argv[]) {
         }
 
         free(file_contents);
-        return exit_code;
+        return 0;
     } else if (strcmp(command, "parse") == 0) {
         char *file_contents = read_file_contents(argv[2]);
+        token_array t_array;
         if (!file_contents) return 1;
 
         scanner_init(file_contents);
-        int exit_code = 0;
+        init_token_array(&t_array);
 
         while (1) {
             token t = scan_token();
+            add_to_token_array(&t_array, t);
+            
             if (t.type == TOKEN_EOF) {
-                printf("EOF  null\n");
                 break;
             } else if (t.type == ERROR) {
                 fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
-                exit_code = 65;
+                fflush(stderr);
+                free(file_contents);
+                free_token_array(&t_array);
+                exit(65);
             }
-            else {
-                if (!t.value) printf("%s\n", t.symbol);
-                else printf("%s\n", t.value);
-            }
+        }
 
-            fflush(stdout);
-            free_token(&t);
+        char *parsed_expression = parsed_token_expression(&t_array);
+        if (parsed_expression) {
+            printf("%s\n", parsed_expression);
+            free(parsed_expression);
         }
 
         free(file_contents);
-        return exit_code;
+        free_token_array(&t_array);
+        return 0;
         
     } else {
         fprintf(stderr, "Unknown command: %s\n", command);
+        fflush(stderr);
         return 1;
     }
 }

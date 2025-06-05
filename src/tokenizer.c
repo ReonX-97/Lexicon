@@ -116,25 +116,60 @@ token identifier_keyword_token() {
     size_t length = scn.current - scn.start;
 
     switch (scn.start[0]) {
-        case 'a': if (length == 3 && memcmp(scn.start, "and", 3) == 0) return make_token(AND);
-        case 'c': if (length == 5 && memcmp(scn.start, "class", 5) == 0) return make_token(CLASS);
-        case 'e': if (length == 4 && memcmp(scn.start, "else", 4) == 0) return make_token(ELSE);
+        case 'a': if (length == 3 && memcmp(scn.start, "and", 3) == 0) return make_token(AND); break;
+        case 'c': if (length == 5 && memcmp(scn.start, "class", 5) == 0) return make_token(CLASS); break;
+        case 'e': if (length == 4 && memcmp(scn.start, "else", 4) == 0) return make_token(ELSE); break;
         case 'f':
             if (length == 5 && memcmp(scn.start, "false", 5) == 0) return make_token(FALSE);
             if (length == 3 && memcmp(scn.start, "for", 3) == 0) return make_token(FOR);
             if (length == 3 && memcmp(scn.start, "fun", 3) == 0) return make_token(FUN);
-        case 'i': if (length == 2 && memcmp(scn.start, "if", 2) == 0) return make_token(IF);
-        case 'n': if (length == 3 && memcmp(scn.start, "nil", 3) == 0) return make_token(NIL);
-        case 'o': if (length == 2 && memcmp(scn.start, "or", 2) == 0) return make_token(OR);
-        case 'p': if (length == 5 && memcmp(scn.start, "print", 5) == 0) return make_token(PRINT);
-        case 'r': if (length == 6 && memcmp(scn.start, "return", 6) == 0) return make_token(RETURN);
-        case 's': if (length == 5 && memcmp(scn.start, "super", 5) == 0) return make_token(SUPER);
+            break;
+        case 'i': if (length == 2 && memcmp(scn.start, "if", 2) == 0) return make_token(IF); break;
+        case 'n': if (length == 3 && memcmp(scn.start, "nil", 3) == 0) return make_token(NIL); break;
+        case 'o': if (length == 2 && memcmp(scn.start, "or", 2) == 0) return make_token(OR); break;
+        case 'p': if (length == 5 && memcmp(scn.start, "print", 5) == 0) return make_token(PRINT); break;
+        case 'r': if (length == 6 && memcmp(scn.start, "return", 6) == 0) return make_token(RETURN); break;
+        case 's': if (length == 5 && memcmp(scn.start, "super", 5) == 0) return make_token(SUPER); break;
         case 't':
             if (length == 4 && memcmp(scn.start, "this", 4) == 0) return make_token(THIS);
             if (length == 4 && memcmp(scn.start, "true", 4) == 0) return make_token(TRUE);
-        case 'v': if (length == 3 && memcmp(scn.start, "var", 3) == 0) return make_token(VAR);
-        case 'w': if (length == 5 && memcmp(scn.start, "while", 5) == 0) return make_token(WHILE);
+            break;
+        case 'v': if (length == 3 && memcmp(scn.start, "var", 3) == 0) return make_token(VAR); break;
+        case 'w': if (length == 5 && memcmp(scn.start, "while", 5) == 0) return make_token(WHILE); break;
     }
 
     return make_token(IDENTIFIER);
+}
+
+void init_token_array(token_array *t_array) {
+    t_array->t = malloc(sizeof(token) * INITIAL_CAPACITY);
+    t_array->count = 0;
+    t_array->capacity = INITIAL_CAPACITY;
+}
+
+void add_to_token_array(token_array *t_array, token t) {
+    if (t_array->count >= t_array->capacity) {
+        t_array->capacity = 2 * t_array->capacity;
+        token* new_tokens = realloc(t_array->t, sizeof(token) * t_array->capacity);
+        if (new_tokens == NULL) {
+            fprintf(stderr, "Memory allocation failed!\n");
+            fflush(stderr);
+            exit(1);
+        }
+        t_array->t = new_tokens;
+
+    }
+
+    t_array->t[t_array->count++] = t;
+}
+
+void free_token_array(token_array* t_array) {
+    for (int i = 0; i < t_array->count; i++) {
+        free_token(&t_array->t[i]);
+    }
+
+    free(t_array->t);
+    t_array->t = NULL;
+    t_array->count = 0;
+    t_array->capacity = 0;
 }

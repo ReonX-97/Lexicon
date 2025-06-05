@@ -1,9 +1,10 @@
+#define INITIAL_CAPACITY 64
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef enum {
-    // Syntactic Tokens
     LEFT_PAREN,
     RIGHT_PAREN,
     LEFT_BRACE,
@@ -14,14 +15,12 @@ typedef enum {
     TOKEN_EOF,
     ERROR,
 
-    // Mathematical Operators
     MINUS,
     PLUS,
     STAR,
     SLASH,
     EQUAL,
 
-    // Relational Operators
     EQUAL_EQUAL,
     BANG,
     BANG_EQUAL,
@@ -30,12 +29,10 @@ typedef enum {
     GREATER,
     GREATER_EQUAL,
 
-    // Data Types
     STRING,
     NUMBER,
     IDENTIFIER,
 
-    //KEYWORDS
     AND, 
     CLASS, 
     ELSE, 
@@ -65,6 +62,12 @@ typedef struct {
 } token;
 
 typedef struct {
+    token *t;
+    int count;
+    int capacity;
+} token_array;
+
+typedef struct {
     const char *start;
     const char *current;
     int line;
@@ -90,3 +93,6 @@ const char* token_type_to_string(token_type type);
 int is_digit(char c);
 int is_letter(char c);
 void free_token(token *t);
+void init_token_array(token_array *t_array);
+void add_to_token_array(token_array *t_array, token t);
+void free_token_array(token_array *t_array);
