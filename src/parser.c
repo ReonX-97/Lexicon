@@ -4,7 +4,109 @@
 
 parser psr;
 
-char* parsed_token_expression(token_array *t_array) {
+expr* make_literal_expr(token value) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_LITERAL;
+    e->as.literal.value = value;
+    return e;
+}
+
+expr* make_binary_expr(expr* left, token_type operator, expr* right) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_BINARY;
+    e->as.binary.left = left;
+    e->as.binary.operator = operator;
+    e->as.binary.right = right;
+    return e;
+}
+
+expr* make_unary_expr(token_type operator, expr* operand) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_UNARY;
+    e->as.unary.operator = operator;
+    e->as.unary.operand = operand;
+    return e;
+}
+
+expr* make_grouping_expr(expr* expression) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_GROUPING;
+    e->as.grouping.expression = expression;
+    return e;
+}
+
+void free_expr(expr* expression) {
+    if (!expression) return;
+
+    switch (expression->type) {
+    case EXPR_BINARY:
+        free_expr(expression->as.binary.left);
+        free_expr(expression->as.binary.right);
+        break;
+    case EXPR_UNARY:
+        free_expr(expression->as.unary.operand);
+        break;
+    case EXPR_GROUPING:
+        free_expr(expression->as.grouping.expression);
+        break;
+    case EXPR_LITERAL:
+        break;
+    default:
+        break;
+    }
+}
+
+void print_expr(expr* expression) {
+    if (!expression) {
+        printf("NULL");
+        return;
+    }
+    
+    switch (expression->type) {
+        case EXPR_LITERAL:
+            if (expression->as.literal.value.value) {
+                printf("%s", expression->as.literal.value.value);
+            } else if (expression->as.literal.value.symbol) {
+                printf("%s", expression->as.literal.value.symbol);
+            }
+            break;
+        case EXPR_BINARY:
+            printf("(");
+            switch (expression->as.binary.operator) {
+                case PLUS: printf("+ "); break;
+                case MINUS: printf("- "); break;
+                case STAR: printf("* "); break;
+                case SLASH: printf("/ "); break;
+                case EQUAL_EQUAL: printf("== "); break;
+                case BANG_EQUAL: printf("!= "); break;
+                case GREATER: printf("> "); break;
+                case GREATER_EQUAL: printf(">= "); break;
+                case LESS: printf("< "); break;
+                case LESS_EQUAL: printf("<= "); break;
+                case AND: printf("and "); break;
+                case OR: printf("or "); break;
+                default: printf("? "); break;
+            }
+            print_expr(expression->as.binary.left);
+            printf(" ");
+            print_expr(expression->as.binary.right);
+            printf(")");
+            break;
+        case EXPR_UNARY:
+            printf("(");
+            printf("%s ", (expression->as.unary.operator == MINUS) ? "-" : "!");
+            print_expr(expression->as.unary.operand);
+            printf(")");
+            break;
+        case EXPR_GROUPING:
+            printf("(group ");
+            print_expr(expression->as.grouping.expression);
+            printf(")");
+            break;
+    }
+}
+
+expr* parsed_token_expression(token_array *t_array) {
     init_parser(t_array);
     return parse_expression();
 }
@@ -43,194 +145,118 @@ int parser_match(token_type type) {
     } else return 0;
 }
 
-char* parse_expression() {
+expr* parse_expression() {
     return parse_or();
 }
 
-char* parse_or() {
-    char* expr = parse_and();
+expr* parse_or() {
+    expr* left = parse_and();
 
     while (parser_match(OR)) {
-        char* operator = strdup("or");
-        char* right = parse_and();
+        token_type operator = OR;
+        expr* right = parse_and();
 
-        int len = strlen(expr) + strlen(operator) + strlen(right) + 10;
-        char* result = malloc(len);
-        snprintf(result, len, "(%s %s %s)", operator, expr, right);
-
-        free(expr);
-        free(operator);
-        free(right);
-
-        expr = result;
+        left = make_binary_expr(left, operator, right);
     }
 
-    return expr;
+    return left;
     
 }
 
-char* parse_and() {
-    char* expr = parse_equality();
+expr* parse_and() {
+    expr* left = parse_equality();
 
     while (parser_match(AND)) {
-        char* operator = strdup("and");
-        char* right = parse_and();
+        token_type operator = AND;
+        expr* right = parse_and();
 
-        int len = strlen(expr) + strlen(operator) + strlen(right) + 10;
-        char* result = malloc(len);
-        snprintf(result, len, "(%s %s %s)", operator, expr, right);
-
-        free(expr);
-        free(operator);
-        free(right);
-
-        expr = result;
+        left = make_binary_expr(left, operator, right);
     }
 
-    return expr;
+    return left;
 }
 
-char* parse_equality() {
-    char* expr = parse_comparison();
+expr* parse_equality() {
+    expr* left = parse_comparison();
 
     while (parser_match(EQUAL_EQUAL) || parser_match(BANG_EQUAL)) {
-        token operator = parser_previous();
-        char* op_str = (operator.type == BANG_EQUAL) ? "!=" : "==";
-        char* right = parse_comparison();
-
-        int len = strlen(expr) + strlen(op_str) + strlen(right) + 10;
-        char* result = malloc(len);
-        snprintf(result, len, "(%s %s %s)", op_str, expr, right);
-
-        free(expr);
-        free(right);
-
-        expr = result;
+        token_type operator = parser_previous().type;
+        expr* right = parse_comparison();
+        
+        left = make_binary_expr(left, operator, right);
     }
 
-    return expr;   
+    return left;  
 }
 
-char* parse_comparison() {
-    char* expr = parse_term();
+expr* parse_comparison() {
+    expr* left = parse_term();
 
     while (parser_match(GREATER) || parser_match(GREATER_EQUAL) || 
         parser_match(LESS) || parser_match(LESS_EQUAL)) {
-
-        token operator = parser_previous();
-        char* op_str;
-        switch (operator.type) {
-            case GREATER: op_str = ">"; break;
-            case GREATER_EQUAL: op_str = ">="; break;
-            case LESS: op_str = "<"; break;
-            case LESS_EQUAL: op_str = "<="; break;
-            default: op_str = "?"; break;
-        }
-        char* right = parse_term();
-
-        int len = strlen(expr) + strlen(op_str) + strlen(right) + 10;
-        char* result = malloc(len);
-        snprintf(result, len, "(%s %s %s)", op_str, expr, right);
-
-        free(expr);
-        free(right);
-
-        expr = result;
+        
+        token_type operator = parser_previous().type;
+        expr* right = parse_term();
+        
+        left = make_binary_expr(left, operator, right);
     }
-    
-    return expr;
+
+    return left; 
 }
 
-char* parse_term() {
-    char* expr = parse_factor();
+expr* parse_term() {
+    expr* left = parse_factor();
     
     while (parser_match(MINUS) || parser_match(PLUS)) {
-        token operator = parser_previous();
-        char* op_str = (operator.type == MINUS) ? "-" : "+";
-        char* right = parse_factor();
+        token_type operator = parser_previous().type;
+        expr* right = parse_factor();
         
-        int len = strlen(expr) + strlen(right) + strlen(op_str) + 10;
-        char* result = malloc(len);
-        snprintf(result, len, "(%s %s %s)", op_str, expr, right);
-        
-        free(expr);
-        free(right);
-        expr = result;
+        left = make_binary_expr(left, operator, right);
     }
-    
-    return expr;
+
+    return left;
 }
 
-char* parse_factor() {
-    char* expr = parse_unary();
+expr* parse_factor() {
+    expr* left = parse_unary();
     
     while (parser_match(SLASH) || parser_match(STAR)) {
-        token operator = parser_previous();
-        char* op_str = (operator.type == SLASH) ? "/" : "*";
-        char* right = parse_unary();
+        token_type operator = parser_previous().type;
+        expr* right = parse_unary();
         
-        int len = strlen(expr) + strlen(right) + strlen(op_str) + 10;
-        char* result = malloc(len);
-        snprintf(result, len, "(%s %s %s)", op_str, expr, right);
-        
-        free(expr);
-        free(right);
-        expr = result;
+        left = make_binary_expr(left, operator, right);
     }
-    
-    return expr;
+
+    return left; 
 }
 
-char* parse_unary() {
+expr* parse_unary() {
     if (parser_match(BANG) || parser_match(MINUS)) {
-        token operator = parser_previous();
-        char* op_str = (operator.type == BANG) ? "!" : "-";
-        char* right = parse_unary();
-
-        int len = strlen(op_str) + strlen(right) + 10;
-        char* result = malloc(len); 
-        snprintf(result, len, "(%s %s)", op_str, right);
-
-        free(right);
-        return result;
+        token_type operator = parser_previous().type;
+        expr* right = parse_unary();
+        
+        return make_unary_expr(operator, right);
     }
 
-    return parse_primary();
+    return parse_primary(); 
 }
 
-char* parse_primary() {
-    if (parser_match(TRUE)) return strdup("true");
-    if (parser_match(FALSE)) return strdup("false");
-    if (parser_match(NIL)) return strdup("nil");
-    if (parser_match(NUMBER)) {
-        token t = parser_previous();
-        return strdup(t.value ? t.value : "0.0");
-    }
-    if (parser_match(STRING)) {
-        token t = parser_previous();
-        return strdup(t.value ? t.value : "");
-    }
-    if (parser_match(IDENTIFIER)) {
-        token t = parser_previous();
-        return strdup(t.symbol ? t.symbol : "identifier");
-    }
+expr* parse_primary() {
+    if (parser_match(TRUE)) return make_literal_expr(parser_previous());
+    if (parser_match(FALSE)) return make_literal_expr(parser_previous());
+    if (parser_match(NIL)) return make_literal_expr(parser_previous());
+    if (parser_match(NUMBER)) return make_literal_expr(parser_previous());
+    if (parser_match(STRING)) return make_literal_expr(parser_previous());
+    if (parser_match(IDENTIFIER)) return make_literal_expr(parser_previous());
     if (parser_match(LEFT_PAREN)) {
-        char* expr =  parse_expression();
+        expr* expression =  parse_expression();
 
-        if (parser_match(RIGHT_PAREN)) {
-            int len = strlen(expr) + 10;
-            char* result = malloc(len);
+        if (parser_match(RIGHT_PAREN)) return make_grouping_expr(expression);
 
-            snprintf(result, len, "(group %s)", expr);
-            
-            free(expr);
-            return result;
-        }
-
-        free(expr);
+        free_expr(expression);
         fprintf(stderr, "[line %d] Error at ')': Expect expression.", parser_previous().line);
         fflush(stderr);
-        return NULL;
+        exit(65);
     }
 
     token current = parser_peek();

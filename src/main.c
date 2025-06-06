@@ -1,4 +1,4 @@
-#include "parser.h"
+#include "evaluate.h"
 
 scanner scn;
 
@@ -135,10 +135,44 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        char *parsed_expression = parsed_token_expression(&t_array);
+        expr *parsed_expression = parsed_token_expression(&t_array);
         if (parsed_expression) {
-            printf("%s\n", parsed_expression);
-            free(parsed_expression);
+            print_expr(parsed_expression);
+            free_expr(parsed_expression);
+        }
+
+        free(file_contents);
+        free_token_array(&t_array);
+        return 0;
+        
+    } else if (strcmp(command, "evaluate") == 0) {
+        char *file_contents = read_file_contents(argv[2]);
+        token_array t_array;
+        if (!file_contents) return 1;
+
+        scanner_init(file_contents);
+        init_token_array(&t_array);
+
+        while (1) {
+            token t = scan_token();
+            add_to_token_array(&t_array, t);
+            
+            if (t.type == TOKEN_EOF) {
+                break;
+            } else if (t.type == ERROR) {
+                fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
+                fflush(stderr);
+                free(file_contents);
+                free_token_array(&t_array);
+                exit(65);
+            }
+        }
+
+        expr *parsed_expression = parsed_token_expression(&t_array);
+        if (parsed_expression) {
+            token tkn = evaluate_expression(parsed_expression);
+            printf("%s", tkn.value ? tkn.value : tkn.symbol);
+            fflush(stdout);
         }
 
         free(file_contents);
