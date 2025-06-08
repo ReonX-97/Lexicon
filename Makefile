@@ -10,7 +10,7 @@ OBJDIR = obj
 BINDIR = bin
 
 # Target executable (inside bin)
-TARGET_NAME = tokenizer
+TARGET_NAME = lexicon
 TARGET = $(BINDIR)/$(TARGET_NAME)
 
 # Source and object files

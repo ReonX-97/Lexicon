@@ -3,3 +3,4 @@ bin/*
 obj/*
 test/*
 tree.txt
+script.sh

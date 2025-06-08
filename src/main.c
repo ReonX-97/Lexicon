@@ -1,4 +1,4 @@
-#include "evaluate.h"
+#include "execute.h"
 
 scanner scn;
 
@@ -91,6 +91,7 @@ int main(int argc, char *argv[]) {
         if (!file_contents) return 1;
 
         scanner_init(file_contents);
+        int exit_code = 0;
 
         while (1) {
             token t = scan_token();
@@ -100,7 +101,7 @@ int main(int argc, char *argv[]) {
             } else if (t.type == ERROR) {
                 fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
                 fflush(stderr);
-                exit(65);
+                exit_code = 65;
             }
             else {
                 printf("%s %s %s\n", token_type_to_string(t.type), t.symbol ? t.symbol : "null", t.value ? t.value : "null");
@@ -111,7 +112,7 @@ int main(int argc, char *argv[]) {
         }
 
         free(file_contents);
-        return 0;
+        return exit_code;
     } else if (strcmp(command, "parse") == 0) {
         char *file_contents = read_file_contents(argv[2]);
         token_array t_array;
@@ -173,6 +174,41 @@ int main(int argc, char *argv[]) {
             token tkn = evaluate_expression(parsed_expression);
             printf("%s", tkn.value ? tkn.value : tkn.symbol);
             fflush(stdout);
+        }
+
+        free(file_contents);
+        free_token_array(&t_array);
+        return 0;
+        
+    } else if (strcmp(command, "run") == 0) {
+        char *file_contents = read_file_contents(argv[2]);
+        token_array t_array;
+        if (!file_contents) return 1;
+
+        scanner_init(file_contents);
+        init_token_array(&t_array);
+
+        while (1) {
+            token t = scan_token();
+            add_to_token_array(&t_array, t);
+            
+            if (t.type == TOKEN_EOF) {
+                break;
+            } else if (t.type == ERROR) {
+                fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
+                fflush(stderr);
+                free(file_contents);
+                free_token_array(&t_array);
+                exit(65);
+            }
+        }
+
+        parse_results* results = parse(&t_array);
+        if (results) interpret(results);
+        else {
+            fprintf(stderr, "Error Parsing Results");
+            fflush(stderr);
+            exit(70);
         }
 
         free(file_contents);

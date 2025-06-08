@@ -10,6 +10,7 @@ This project implements the lexical analysis (tokenization) and parsing phases o
 
 - **Tokenization**: Converts Lox source code into tokens
 - **Expression Parsing**: Parses expressions with proper operator precedence
+- **Expression Evaluation**: Evaluates expressions with proper operator precedence
 - **Error Handling**: Comprehensive error reporting with line numbers
 - **Memory Management**: Proper allocation and deallocation of dynamic memory
 
@@ -49,14 +50,17 @@ This project implements the lexical analysis (tokenization) and parsing phases o
 │   └── tokenizer
 ├── include/               # Header files
 │   ├── parser.h
+│   ├── evaluate.h
 │   └── tokenizer_scanner.h
 ├── obj/                   # Object files
 ├── src/                   # Source files
 │   ├── main.c            # Main program entry point
 │   ├── parser.c          # Expression parser implementation
 │   ├── scanner.c         # Token scanner
+│   ├── evaluate.c         # Expression evaluator implementation
 │   └── tokenizer.c       # Token creation and management
 ├── test/                  # Test files and outputs
+├── README.md
 └── Makefile              # Build configuration
 ```
 
@@ -171,6 +175,11 @@ EOF null
 **Parsing output:**
 ```
 (== (+ 1.0 (* 2.0 3.0)) 7.0)
+```
+
+**Evaluation output:**
+```
+true
 ```
 
 ## Development
