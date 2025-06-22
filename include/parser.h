@@ -3,6 +3,7 @@
 #include "tokenizer_scanner.h"
 
 typedef enum {
+    EXPR_CALL,
     EXPR_ASSIGN,
     EXPR_LITERAL,
     EXPR_BINARY,
@@ -18,6 +19,7 @@ typedef enum {
     STMT_IF,
     STMT_WHILE,
     STMT_FOR,
+    STMT_FUN_DEF,
     STMT_RETURN
 } stmt_type;
 
@@ -48,6 +50,12 @@ typedef struct {
     expr* expression;
 } grouping_expr;
 
+typedef struct {
+    expr* callee;
+    expr** arguments;
+    int arg_count;
+} call_expr;
+
 struct expr {
     expr_type type;
     union {
@@ -56,6 +64,7 @@ struct expr {
         binary_expr binary;
         unary_expr unary;
         grouping_expr grouping;
+        call_expr call;
     } as;
 };
 
@@ -95,6 +104,17 @@ typedef struct {
     stmt* body;
 } for_stmt;
 
+typedef struct {
+    token name;
+    token* parameters;
+    int param_count;
+    stmt* body;
+} fun_def_stmt;
+
+typedef struct {
+    expr* return_value;
+} return_stmt;
+
 struct stmt {
     stmt_type type;
     union {
@@ -105,6 +125,8 @@ struct stmt {
         if_stmt if_stmt_var;
         while_stmt while_stmt_var;
         for_stmt for_stmt_var;
+        fun_def_stmt fun_def_stmt_var;
+        return_stmt return_stmt_var;
     } as;
 };
 
@@ -126,12 +148,15 @@ int parser_is_at_end();
 token parser_peek();
 token parser_previous();
 token parser_advance();
+token parser_peek_next();
 int parser_check(token_type type);
 int parser_match(token_type type);
+token get_variable(char* name);
 
 parse_results* parse(token_array *t_array);
 
 expr* parse_expression(); // first call or if (){}[] then called
+expr* parse_assignment(); // assigning value
 expr* parse_or(); // or
 expr* parse_and(); // and
 expr* parse_equality(); // equal / not equal
@@ -145,8 +170,8 @@ expr* make_literal_expr(token value);
 expr* make_binary_expr(expr* left, token_type operator, expr* right);
 expr* make_unary_expr(token_type operator, expr* operand);
 expr* make_grouping_expr(expr* expression);
-expr* parse_assignment();
 expr* make_assign_expr(token name, expr* value);
+expr* make_call_expr(token value);
 void free_expr(expr* expression);
 void print_expr(expr* expression);
 
@@ -159,5 +184,7 @@ stmt* block();
 stmt* if_statement();
 stmt* while_statement();
 stmt* for_statement();
+stmt* fun_def_statement();
+stmt* return_statement();
 void free_statement(stmt* statement);
 void free_statements(stmt** statements);

@@ -11,6 +11,8 @@ stmt* statement() {
     if (parser_match(IF)) return if_statement();
     if (parser_match(WHILE)) return while_statement();
     if (parser_match(FOR)) return for_statement();
+    if (parser_match(FUN)) return fun_def_statement();
+    if (parser_match(RETURN)) return return_statement();
 
     return expression_statement();
 }
@@ -30,7 +32,7 @@ stmt* expression_statement() {
     if (!parser_match(SEMICOLON)) {
         fprintf(stderr, "[line %d] Expect ';' after expression.", parser_peek().line);
         fflush(stderr);
-        exit(70);
+        exit(65);
     }
 
     return output;
@@ -51,7 +53,7 @@ stmt* print_statement() {
     if (!parser_match(SEMICOLON)) {
         fprintf(stderr, "[line %d] Expect ';' after expression.", parser_peek().line);
         fflush(stderr);
-        exit(70);
+        exit(65);
     }
     
     return output;
@@ -70,7 +72,7 @@ stmt* var_declaration() {
     if (!parser_match(IDENTIFIER)) {
         fprintf(stderr, "[line %d] No Identifier.", parser_peek().line);
         fflush(stderr); 
-        exit(70);       
+        exit(65);       
     }
 
     output->as.var_stmt_var.tkn = parser_previous();
@@ -81,7 +83,7 @@ stmt* var_declaration() {
     if (!parser_match(SEMICOLON)) {
         fprintf(stderr, "[line %d] Expect ';' after expression.", parser_peek().line);
         fflush(stderr);
-        exit(70); 
+        exit(65); 
     }
     
     output->as.var_stmt_var.initializer = initializer;
@@ -145,7 +147,7 @@ stmt* if_statement() {
     if (!parser_match(LEFT_PAREN)) {
         fprintf(stderr, "[line %d] Expected '(' after if.", parser_peek().line);
         fflush(stderr);
-        exit(70);
+        exit(65);
     }
 
     output->as.if_stmt_var.condition = parse_expression();
@@ -153,7 +155,7 @@ stmt* if_statement() {
     if (!parser_match(RIGHT_PAREN)) {
         fprintf(stderr, "[line %d] Expected ')' after if condition.", parser_peek().line);
         fflush(stderr);
-        exit(70);
+        exit(65);
     }
 
     output->as.if_stmt_var.then_branch = declaration();
@@ -177,7 +179,7 @@ stmt* while_statement() {
     if (!parser_match(LEFT_PAREN)) {
         fprintf(stderr, "[line %d] Expected '(' after while.", parser_peek().line);
         fflush(stderr);
-        exit(70);
+        exit(65);
     }
 
     output->as.while_stmt_var.condition = parse_expression();
@@ -185,7 +187,7 @@ stmt* while_statement() {
     if (!parser_match(RIGHT_PAREN)) {
         fprintf(stderr, "[line %d] Expected ')' after while condition.", parser_peek().line);
         fflush(stderr);exit(70);
-        exit(70);
+        exit(65);
     }
 
     output->as.while_stmt_var.body = declaration();
@@ -207,7 +209,7 @@ stmt* for_statement() {
         fprintf(stderr, "[line %d] Expected '(' after for.", parser_peek().line);
         fflush(stderr);
         free_statement(output);
-        exit(70);
+        exit(65);
     }
 
     if (parser_match(SEMICOLON)) {
@@ -226,7 +228,7 @@ stmt* for_statement() {
             fprintf(stderr, "[line %d] No Identifier.", parser_peek().line);
             fflush(stderr);
             free_statement(output); 
-            exit(70);       
+            exit(65);       
         }
 
         var_stmt->as.var_stmt_var.tkn = parser_previous();
@@ -238,7 +240,7 @@ stmt* for_statement() {
             fprintf(stderr, "[line %d] Expect ';' after variable declaration.", parser_peek().line);
             fflush(stderr);
             free_statement(output);
-            exit(70); 
+            exit(65); 
         }
         
         var_stmt->as.var_stmt_var.initializer = initializer;
@@ -266,7 +268,7 @@ stmt* for_statement() {
         fprintf(stderr, "[line %d] Expected ';' after for condition.", parser_peek().line);
         fflush(stderr);
         free_statement(output);
-        exit(70);
+        exit(65);
     }
     
     if (parser_check(RIGHT_PAREN)) output->as.for_stmt_var.change = NULL;
@@ -287,10 +289,102 @@ stmt* for_statement() {
         fprintf(stderr, "[line %d] Expected ')' after for clauses.", parser_peek().line);
         fflush(stderr);
         free_statement(output);
-        exit(70);
+        exit(65);
     }
 
     output->as.for_stmt_var.body = statement();
 
     return output;    
+}
+
+stmt* fun_def_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_FUN_DEF;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    if (!parser_match(IDENTIFIER)) {
+        fprintf(stderr, "[line %d] Identifier Required", parser_peek().line);
+        fflush(stderr);
+        exit(65);        
+    } else output->as.fun_def_stmt_var.name = parser_previous();
+
+    if (parser_match(LEFT_PAREN)) {
+        output->as.fun_def_stmt_var.parameters = NULL;
+        output->as.fun_def_stmt_var.param_count = 0;
+
+        while(!parser_check(RIGHT_PAREN) && !parser_is_at_end()) {
+            if (!parser_match(IDENTIFIER)) {
+                fprintf(stderr, "[line %d] Expected parameter name", parser_peek().line);
+                fflush(stderr);
+                exit(65);
+            }
+
+            output->as.fun_def_stmt_var.param_count++;
+            output->as.fun_def_stmt_var.parameters = realloc(
+                    output->as.fun_def_stmt_var.parameters,
+                    output->as.fun_def_stmt_var.param_count * sizeof(token)
+                );
+
+            if (!output->as.fun_def_stmt_var.parameters) {
+                fprintf(stderr, "[line %d] Memory allocation failed for parameters", parser_peek().line);
+                fflush(stderr);
+                exit(70);
+            }
+
+            output->as.fun_def_stmt_var.parameters[output->as.fun_def_stmt_var.param_count - 1] = parser_previous();
+
+            if (!parser_match(COMMA)) break;
+        }
+
+        if (!parser_match(RIGHT_PAREN)) {
+            fprintf(stderr, "[line %d] Expected ')' after parameters", parser_peek().line);
+            fflush(stderr);
+            exit(65);
+        }
+    } else {
+        fprintf(stderr, "[line %d] Expected '(' after function name", parser_peek().line);
+        fflush(stderr);
+        exit(65);
+    }
+
+    if (parser_match(LEFT_BRACE)) output->as.fun_def_stmt_var.body = block();
+    else if (parser_match(SEMICOLON)) output->as.fun_def_stmt_var.body = NULL;
+    else {
+        fprintf(stderr, "[line %d] Expected ';' before function declaration", parser_peek().line);
+        fflush(stderr);
+        exit(65);
+    }
+
+    return output;
+}
+
+stmt* return_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_RETURN;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    if (parser_match(SEMICOLON)) {
+        output->as.return_stmt_var.return_value = NULL;
+        return output;
+    }
+
+    output->as.return_stmt_var.return_value = parse_expression();
+
+    if (!parser_match(SEMICOLON)) {
+        fprintf(stderr, "[line %d] Expect ';' after expression.", parser_peek().line);
+        fflush(stderr);
+        exit(65); 
+    }
+
+    return output;
 }

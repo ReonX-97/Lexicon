@@ -71,6 +71,11 @@ token parser_previous() {
     return psr.t_array->t[psr.current - 1];
 }
 
+token parser_peek_next() {
+    if (!parser_is_at_end()) return psr.t_array->t[psr.current + 1];
+    else return error_token("At the End");
+}
+
 token parser_advance() {
     if (parser_peek().type != TOKEN_EOF) psr.current++;
     return parser_previous();
@@ -127,12 +132,43 @@ expr* make_assign_expr(token name, expr* value) {
     return e;
 }
 
+expr* make_call_expr(token value) {
+    expr* output = malloc(sizeof(expr));
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", value.line);
+        fflush(stderr);
+        exit(70);
+    }
+    
+    output->type = EXPR_CALL;
+    
+    output->as.call.callee = malloc(sizeof(expr));
+    if (!output->as.call.callee) {
+        fprintf(stderr, "[line %d] Memory allocation failed for callee", value.line);
+        fflush(stderr);
+        free(output);
+        exit(70);
+    }
+    
+    output->as.call.callee->type = EXPR_LITERAL;
+    output->as.call.callee->as.literal.value = value;
+    
+    output->as.call.arguments = NULL;
+    
+    return output;
+}
+
 void free_expr(expr* expression) {
     if (!expression) return;
 
     switch (expression->type) {
         case EXPR_ASSIGN:
             free_expr(expression->as.assign.value);
+            break;
+        case EXPR_CALL:
+            free_expr(expression->as.call.callee);
+            for (int i = 0; i < expression->as.call.arg_count; i++) 
+                free_expr(expression->as.call.arguments[i]);
             break;
         case EXPR_BINARY:
             free_expr(expression->as.binary.left);
@@ -207,6 +243,8 @@ void print_expr(expr* expression) {
             print_expr(expression->as.assign.value);
             printf(")");
             break;
+        case EXPR_CALL:
+            break;
 
     }
     fflush(stdout);
@@ -253,10 +291,18 @@ void free_statement(stmt* statement) {
             free_statement(statement->as.for_stmt_var.body);
             break;
 
+        case STMT_FUN_DEF:
+            free_token(&(statement->as.fun_def_stmt_var.name));
+            for (int i = 0; i < statement->as.fun_def_stmt_var.param_count; i++) {
+                free_token(&(statement->as.fun_def_stmt_var.parameters[i]));
+            }
+            free_statement(statement->as.fun_def_stmt_var.body);
+            break;
+
         case STMT_RETURN:
+            free_expr(statement->as.return_stmt_var.return_value);
             break;
     }
-
     free(statement);
 }
 

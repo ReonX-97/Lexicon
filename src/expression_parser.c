@@ -4,26 +4,23 @@ expr* parse_expression() {
     return parse_assignment();
 }
 
-// New function: Parse assignment expressions (lowest precedence)
 expr* parse_assignment() {
     expr* expr_node = parse_or();
     
     if (parser_match(EQUAL)) {
         token equals = parser_previous();
-        expr* value = parse_assignment(); // Right associative
+        expr* value = parse_assignment();
         
         if (expr_node->type == EXPR_LITERAL && expr_node->as.literal.value.type == IDENTIFIER) {
-            // Create assignment expression
             expr* assign_expr = malloc(sizeof(expr));
             assign_expr->type = EXPR_ASSIGN;
             assign_expr->as.assign.name = expr_node->as.literal.value;
             assign_expr->as.assign.value = value;
             
-            free(expr_node); // Free the original identifier expression
+            free(expr_node);
             return assign_expr;
         }
         
-        // Invalid assignment target
         fprintf(stderr, "[line %d] Invalid assignment target.\n", equals.line);
         fflush(stderr);
         exit(70);
@@ -51,7 +48,7 @@ expr* parse_and() {
 
     while (parser_match(AND)) {
         token_type operator = AND;
-        expr* right = parse_and();
+        expr* right = parse_equality();
 
         left = make_binary_expr(left, operator, right);
     }
@@ -130,7 +127,37 @@ expr* parse_primary() {
     if (parser_match(NIL)) return make_literal_expr(parser_previous());
     if (parser_match(NUMBER)) return make_literal_expr(parser_previous());
     if (parser_match(STRING)) return make_literal_expr(parser_previous());
-    if (parser_match(IDENTIFIER)) return make_literal_expr(parser_previous());
+    if (parser_match(IDENTIFIER)) {
+        if (parser_peek().type == LEFT_PAREN) {
+            expr* call = make_call_expr(parser_previous());
+
+            parser_advance();
+
+            int arg_count = 0;
+            expr** arguments = NULL;
+
+            if (!parser_check(RIGHT_PAREN)) {
+                do {
+                    expr* arg = parse_expression();
+                    ++arg_count;
+                    arguments = realloc(arguments, arg_count * sizeof(expr*));
+                    arguments[arg_count - 1] = arg;
+                } while (parser_match(COMMA));
+            }
+
+            if (!parser_match(RIGHT_PAREN)) {
+                fprintf(stderr, "[line %d] Error at ')': Expect expression.", parser_previous().line);
+                fflush(stderr);
+                exit(65);                
+            }
+
+            call->as.call.arguments = arguments;
+            call->as.call.arg_count = arg_count;
+
+            return call;
+        }
+        else return make_literal_expr(parser_previous());
+    }
     if (parser_match(LEFT_PAREN)) {
         expr* expression =  parse_expression();
 
@@ -152,3 +179,4 @@ expr* parse_primary() {
     fflush(stderr);
     exit(65);
 }
+

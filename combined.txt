@@ -1,0 +1,2480 @@
+==== BEGIN: src/tokenizer.c ====
+#include "tokenizer_scanner.h"
+
+token make_token(token_type type) {
+    token t;
+    t.type = type;
+    t.start = scn.start;
+    t.length = (int)(scn.current - scn.start);
+    t.line = scn.line;
+    
+    t.symbol = malloc(t.length + 1);
+    if (t.symbol) {
+        memcpy(t.symbol, scn.start, t.length);
+        t.symbol[t.length] = '\0';
+    }
+    
+    t.value = NULL;
+    return t;
+}
+
+token make_token_with_value(token_type type, const char *value) {
+    token t = make_token(type);
+    if (value) {
+        t.value = malloc(strlen(value) + 1);
+        if (t.value) {
+            strcpy(t.value, value);
+        }
+    }
+    return t;
+}
+
+token error_token(const char *message) {
+    token t;
+    t.type = ERROR;
+    t.start = NULL;
+    t.length = 0;
+    t.line = scn.line;
+    t.symbol = malloc(strlen(message) + 1);
+    if (t.symbol) {
+        strcpy(t.symbol, message);
+    }
+    t.value = NULL;
+    return t;
+}
+
+void free_token(token *t) {
+    if (t->symbol) {
+        free(t->symbol);
+        t->symbol = NULL;
+    }
+    if (t->value) {
+        free(t->value);
+        t->value = NULL;
+    }
+}
+
+token string_token() {
+    while (peek() != '"' && !is_at_end()) {
+        if (peek() == '\n') scn.line++;
+        advance();
+    }
+    
+    if (is_at_end()) return error_token("Unterminated string.");
+
+    advance();
+
+    token t = make_token(STRING);
+    
+    if (t.length >= 2) {
+        int value_length = t.length - 2;
+        t.value = malloc(value_length + 1);
+        if (t.value) {
+            memcpy(t.value, scn.start + 1, value_length);
+            t.value[value_length] = '\0';
+        }
+    }
+
+    return t;
+}
+
+token number_token() {
+    int dot_count = 0;
+    while ((is_digit(peek()) || peek() == '.') && dot_count <= 1) {
+        if (peek() == '.') dot_count++;
+        advance();
+    }
+
+    if (dot_count > 1) return error_token("Not a Valid Number");
+
+    token t = make_token(NUMBER);
+
+    char raw[t.length + 1];
+    memcpy(raw, scn.start, t.length);
+    raw[t.length] = '\0';
+
+    if (strchr(raw, '.')) {
+        int len = strlen(raw);
+        while (len > 0 && raw[len - 1] == '0') len--;
+        if (len > 0 && raw[len - 1] == '.') {
+            raw[len++] = '0';
+        }
+        raw[len] = '\0';
+    } else {
+        strcat(raw, ".0");
+    }
+
+    t.value = malloc(strlen(raw) + 1);
+    if (t.value) {
+        strcpy(t.value, raw);
+    }
+
+    return t;
+}
+
+token identifier_keyword_token() {
+    while (is_letter(peek()) || is_digit(peek()) || peek() == '_') advance();
+    size_t length = scn.current - scn.start;
+
+    switch (scn.start[0]) {
+        case 'a': if (length == 3 && memcmp(scn.start, "and", 3) == 0) return make_token(AND); break;
+        case 'c': if (length == 5 && memcmp(scn.start, "class", 5) == 0) return make_token(CLASS); break;
+        case 'e': if (length == 4 && memcmp(scn.start, "else", 4) == 0) return make_token(ELSE); break;
+        case 'f':
+            if (length == 5 && memcmp(scn.start, "false", 5) == 0) return make_token(FALSE);
+            if (length == 3 && memcmp(scn.start, "for", 3) == 0) return make_token(FOR);
+            if (length == 3 && memcmp(scn.start, "fun", 3) == 0) return make_token(FUN);
+            break;
+        case 'i': if (length == 2 && memcmp(scn.start, "if", 2) == 0) return make_token(IF); break;
+        case 'n': if (length == 3 && memcmp(scn.start, "nil", 3) == 0) return make_token(NIL); break;
+        case 'o': if (length == 2 && memcmp(scn.start, "or", 2) == 0) return make_token(OR); break;
+        case 'p': if (length == 5 && memcmp(scn.start, "print", 5) == 0) return make_token(PRINT); break;
+        case 'r': if (length == 6 && memcmp(scn.start, "return", 6) == 0) return make_token(RETURN); break;
+        case 's': if (length == 5 && memcmp(scn.start, "super", 5) == 0) return make_token(SUPER); break;
+        case 't':
+            if (length == 4 && memcmp(scn.start, "this", 4) == 0) return make_token(THIS);
+            if (length == 4 && memcmp(scn.start, "true", 4) == 0) return make_token(TRUE);
+            break;
+        case 'v': if (length == 3 && memcmp(scn.start, "var", 3) == 0) return make_token(VAR); break;
+        case 'w': if (length == 5 && memcmp(scn.start, "while", 5) == 0) return make_token(WHILE); break;
+    }
+
+    return make_token(IDENTIFIER);
+}
+
+void init_token_array(token_array *t_array) {
+    t_array->t = malloc(sizeof(token) * INITIAL_CAPACITY);
+    t_array->count = 0;
+    t_array->capacity = INITIAL_CAPACITY;
+}
+
+void add_to_token_array(token_array *t_array, token t) {
+    if (t_array->count >= t_array->capacity) {
+        t_array->capacity = 2 * t_array->capacity;
+        token* new_tokens = realloc(t_array->t, sizeof(token) * t_array->capacity);
+        if (new_tokens == NULL) {
+            fprintf(stderr, "Memory allocation failed!\n");
+            fflush(stderr);
+            exit(1);
+        }
+        t_array->t = new_tokens;
+
+    }
+
+    t_array->t[t_array->count++] = t;
+}
+
+void free_token_array(token_array* t_array) {
+    for (int i = 0; i < t_array->count; i++) {
+        free_token(&t_array->t[i]);
+    }
+
+    free(t_array->t);
+    t_array->t = NULL;
+    t_array->count = 0;
+    t_array->capacity = 0;
+}
+
+==== END: src/tokenizer.c ====
+
+==== BEGIN: src/scanner.c ====
+#include "tokenizer_scanner.h"
+
+void scanner_init(const char *source) {
+    scn.start = source;
+    scn.current = source;
+    scn.line = 1;
+}
+
+char advance() {
+    return *scn.current++;
+}
+
+char peek() {
+    return *scn.current;
+}
+
+char peek_next() {
+    return is_at_end() || *(scn.current + 1) == '\0' ? '\0' : *(scn.current + 1);
+}
+
+int is_at_end() {
+    return *scn.current == '\0';
+}
+
+int is_digit(char c) {
+    return (c >= '0' && c <= '9');
+}
+
+int is_letter(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+int match(char expected) {
+    if (is_at_end()) return 0;
+    if (*scn.current != expected) return 0;
+    scn.current++;
+    return 1;
+}
+
+token scan_token() {
+    while (1) {
+        if (is_at_end()) return make_token(TOKEN_EOF);
+
+        scn.start = scn.current;
+        char c = advance();
+
+        switch (c) {
+            case '(': return make_token(LEFT_PAREN);
+            case ')': return make_token(RIGHT_PAREN);
+            case '{': return make_token(LEFT_BRACE);
+            case '}': return make_token(RIGHT_BRACE);
+            case ',': return make_token(COMMA);
+            case '.': return make_token(DOT);
+            case '-': return make_token(MINUS);
+            case '+': return make_token(PLUS);
+            case ';': return make_token(SEMICOLON);
+            case '*': return make_token(STAR);
+            case '/':
+                if (match('/')) {
+                    while (peek() != '\n' && !is_at_end()) advance();
+                    break;
+                }
+                return make_token(SLASH);
+            case '=':
+                if (match('=')) return make_token(EQUAL_EQUAL);
+                return make_token(EQUAL);
+            case '!':
+                if (match('=')) return make_token(BANG_EQUAL);
+                return make_token(BANG);
+            case '<':
+                if (match('=')) return make_token(LESS_EQUAL);
+                return make_token(LESS);
+            case '>':
+                if (match('=')) return make_token(GREATER_EQUAL);
+                return make_token(GREATER);
+            case '"': return string_token();           
+            case '\n': scn.line++; break;
+            case ' ':
+            case '\r':
+            case '\t':
+                break;
+            case '#':
+            case '@':
+            case '$':
+            case '%': {
+                char message[25];
+                snprintf(message, sizeof(message), "Unexpected character: %c", c);
+                return error_token(message);
+            }
+            default:
+                if (is_letter(c) || c == '_') return identifier_keyword_token();
+                else if (is_digit(c)) return number_token();
+                break;
+        }
+    }
+}
+==== END: src/scanner.c ====
+
+==== BEGIN: src/main.c ====
+#include "execute.h"
+
+scanner scn;
+
+const char* token_type_to_string(token_type type) {
+    switch (type) {
+        case LEFT_PAREN:    return "LEFT_PAREN";
+        case RIGHT_PAREN:   return "RIGHT_PAREN";
+        case LEFT_BRACE:    return "LEFT_BRACE";
+        case RIGHT_BRACE:   return "RIGHT_BRACE";
+        case COMMA:         return "COMMA";
+        case DOT:           return "DOT";
+        case MINUS:         return "MINUS";
+        case PLUS:          return "PLUS";
+        case SEMICOLON:     return "SEMICOLON";
+        case STAR:          return "STAR";
+        case SLASH:         return "SLASH";
+        case EQUAL:         return "EQUAL";
+        case EQUAL_EQUAL:   return "EQUAL_EQUAL";
+        case STRING:        return "STRING";
+        case NUMBER:        return "NUMBER";
+        case IDENTIFIER:    return "IDENTIFIER";
+        case TOKEN_EOF:     return "EOF";
+        case BANG:          return "BANG";
+        case BANG_EQUAL:    return "BANG_EQUAL";
+        case LESS:          return "LESS";
+        case LESS_EQUAL:    return "LESS_EQUAL";
+        case GREATER:       return "GREATER";
+        case GREATER_EQUAL: return "GREATER_EQUAL";
+        case AND:           return "AND";
+        case CLASS:         return "CLASS";
+        case ELSE:          return "ELSE";
+        case FALSE:         return "FALSE";
+        case FOR:           return "FOR";
+        case FUN:           return "FUN";
+        case IF:            return "IF";
+        case NIL:           return "NIL";
+        case OR:            return "OR";
+        case PRINT:         return "PRINT";
+        case RETURN:        return "RETURN";
+        case SUPER:         return "SUPER";
+        case THIS:          return "THIS";
+        case TRUE:          return "TRUE";
+        case VAR:           return "VAR";
+        case WHILE:         return "WHILE";
+        case ERROR:         return "ERROR";
+        default:            return "UNKNOWN";
+    }
+}
+
+char *read_file_contents(const char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        fprintf(stderr, "Error reading file: %s\n", filename);
+        fflush(stderr);
+        return NULL;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    rewind(file);
+
+    char *buffer = malloc(size + 1);
+    if (!buffer) {
+        fprintf(stderr, "Memory allocation failed\n");
+        fflush(stderr);
+        fclose(file);
+        return NULL;
+    }
+
+    fread(buffer, 1, size, file);
+    buffer[size] = '\0';
+    fclose(file);
+    return buffer;
+}
+
+int main(int argc, char *argv[]) {
+    setbuf(stdout, NULL);
+    setbuf(stderr, NULL);
+
+    if (argc < 3) {
+        fprintf(stderr, "Usage: ./your_program <command> <filename>\n");
+        fflush(stderr);
+        return 1;
+    }
+
+    const char *command = argv[1];
+
+    if (strcmp(command, "tokenize") == 0) {
+        char *file_contents = read_file_contents(argv[2]);
+        if (!file_contents) return 1;
+
+        scanner_init(file_contents);
+        int exit_code = 0;
+
+        while (1) {
+            token t = scan_token();
+            if (t.type == TOKEN_EOF) {
+                printf("EOF  null\n");
+                break;
+            } else if (t.type == ERROR) {
+                fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
+                fflush(stderr);
+                exit_code = 65;
+            }
+            else {
+                printf("%s %s %s\n", token_type_to_string(t.type), t.symbol ? t.symbol : "null", t.value ? t.value : "null");
+            }
+
+            fflush(stdout);
+            free_token(&t);
+        }
+
+        free(file_contents);
+        return exit_code;
+    } else if (strcmp(command, "parse") == 0) {
+        char *file_contents = read_file_contents(argv[2]);
+        token_array t_array;
+        if (!file_contents) return 1;
+
+        scanner_init(file_contents);
+        init_token_array(&t_array);
+
+        while (1) {
+            token t = scan_token();
+            add_to_token_array(&t_array, t);
+            
+            if (t.type == TOKEN_EOF) {
+                break;
+            } else if (t.type == ERROR) {
+                fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
+                fflush(stderr);
+                free(file_contents);
+                free_token_array(&t_array);
+                exit(65);
+            }
+        }
+
+        expr *parsed_expression = parsed_token_expression(&t_array);
+        if (parsed_expression) {
+            print_expr(parsed_expression);
+            free_expr(parsed_expression);
+        }
+
+        free(file_contents);
+        free_token_array(&t_array);
+        return 0;
+        
+    } else if (strcmp(command, "evaluate") == 0) {
+        char *file_contents = read_file_contents(argv[2]);
+        token_array t_array;
+        if (!file_contents) return 1;
+
+        scanner_init(file_contents);
+        init_token_array(&t_array);
+
+        while (1) {
+            token t = scan_token();
+            add_to_token_array(&t_array, t);
+            
+            if (t.type == TOKEN_EOF) {
+                break;
+            } else if (t.type == ERROR) {
+                fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
+                fflush(stderr);
+                free(file_contents);
+                free_token_array(&t_array);
+                exit(65);
+            }
+        }
+
+        expr *parsed_expression = parsed_token_expression(&t_array);
+        if (parsed_expression) {
+            token tkn = evaluate_expression(parsed_expression);
+            printf("%s", tkn.value ? tkn.value : tkn.symbol);
+            fflush(stdout);
+        }
+
+        free(file_contents);
+        free_token_array(&t_array);
+        return 0;
+        
+    } else if (strcmp(command, "run") == 0) {
+        char *file_contents = read_file_contents(argv[2]);
+        token_array t_array;
+        if (!file_contents) return 1;
+
+        scanner_init(file_contents);
+        init_token_array(&t_array);
+
+        while (1) {
+            token t = scan_token();
+            add_to_token_array(&t_array, t);
+            
+            if (t.type == TOKEN_EOF) {
+                break;
+            } else if (t.type == ERROR) {
+                fprintf(stderr, "[line %d] Error: %s\n", t.line, t.symbol);
+                fflush(stderr);
+                free(file_contents);
+                free_token_array(&t_array);
+                exit(65);
+            }
+        }
+
+        parse_results* results = parse(&t_array);
+        if (results) interpret(results);
+        else {
+            fprintf(stderr, "Error Parsing Results");
+            fflush(stderr);
+            exit(70);
+        }
+
+        free(file_contents);
+        free_token_array(&t_array);
+        return 0;
+        
+    } else {
+        fprintf(stderr, "Unknown command: %s\n", command);
+        fflush(stderr);
+        return 1;
+    }
+}
+==== END: src/main.c ====
+
+==== BEGIN: src/expression_parser.c ====
+#include "parser.h"
+
+expr* parse_expression() {
+    return parse_assignment();
+}
+
+expr* parse_assignment() {
+    expr* expr_node = parse_or();
+    
+    if (parser_match(EQUAL)) {
+        token equals = parser_previous();
+        expr* value = parse_assignment();
+        
+        if (expr_node->type == EXPR_LITERAL && expr_node->as.literal.value.type == IDENTIFIER) {
+            expr* assign_expr = malloc(sizeof(expr));
+            assign_expr->type = EXPR_ASSIGN;
+            assign_expr->as.assign.name = expr_node->as.literal.value;
+            assign_expr->as.assign.value = value;
+            
+            free(expr_node);
+            return assign_expr;
+        }
+        
+        fprintf(stderr, "[line %d] Invalid assignment target.\n", equals.line);
+        fflush(stderr);
+        exit(70);
+    }
+    
+    return expr_node;
+}
+
+expr* parse_or() {
+    expr* left = parse_and();
+
+    while (parser_match(OR)) {
+        token_type operator = OR;
+        expr* right = parse_and();
+
+        left = make_binary_expr(left, operator, right);
+    }
+
+    return left;
+    
+}
+
+expr* parse_and() {
+    expr* left = parse_equality();
+
+    while (parser_match(AND)) {
+        token_type operator = AND;
+        expr* right = parse_and();
+
+        left = make_binary_expr(left, operator, right);
+    }
+
+    return left;
+}
+
+expr* parse_equality() {
+    expr* left = parse_comparison();
+
+    while (parser_match(EQUAL_EQUAL) || parser_match(BANG_EQUAL)) {
+        token_type operator = parser_previous().type;
+        expr* right = parse_comparison();
+        
+        left = make_binary_expr(left, operator, right);
+    }
+
+    return left;  
+}
+
+expr* parse_comparison() {
+    expr* left = parse_term();
+
+    while (parser_match(GREATER) || parser_match(GREATER_EQUAL) || 
+        parser_match(LESS) || parser_match(LESS_EQUAL)) {
+        
+        token_type operator = parser_previous().type;
+        expr* right = parse_term();
+        
+        left = make_binary_expr(left, operator, right);
+    }
+
+    return left; 
+}
+
+expr* parse_term() {
+    expr* left = parse_factor();
+    
+    while (parser_match(MINUS) || parser_match(PLUS)) {
+        token_type operator = parser_previous().type;
+        expr* right = parse_factor();
+        
+        left = make_binary_expr(left, operator, right);
+    }
+
+    return left;
+}
+
+expr* parse_factor() {
+    expr* left = parse_unary();
+    
+    while (parser_match(SLASH) || parser_match(STAR)) {
+        token_type operator = parser_previous().type;
+        expr* right = parse_unary();
+        
+        left = make_binary_expr(left, operator, right);
+    }
+
+    return left; 
+}
+
+expr* parse_unary() {
+    if (parser_match(BANG) || parser_match(MINUS)) {
+        token_type operator = parser_previous().type;
+        expr* right = parse_unary();
+        
+        return make_unary_expr(operator, right);
+    }
+
+    return parse_primary(); 
+}
+
+expr* parse_primary() {
+    if (parser_match(TRUE)) return make_literal_expr(parser_previous());
+    if (parser_match(FALSE)) return make_literal_expr(parser_previous());
+    if (parser_match(NIL)) return make_literal_expr(parser_previous());
+    if (parser_match(NUMBER)) return make_literal_expr(parser_previous());
+    if (parser_match(STRING)) return make_literal_expr(parser_previous());
+    if (parser_match(IDENTIFIER)) {
+        if (parser_peek().type == LEFT_PAREN) {
+            expr* call = make_call_expr(parser_previous());
+
+            parser_advance();
+
+            int arg_count = 0;
+            expr** arguments = NULL;
+
+            if (!parser_check(RIGHT_PAREN)) {
+                do {
+                    expr* arg = parse_expression();
+                    ++arg_count;
+                    arguments = realloc(arguments, arg_count * sizeof(expr*));
+                    arguments[arg_count - 1] = arg;
+                } while (parser_match(COMMA));
+            }
+
+            if (!parser_match(RIGHT_PAREN)) {
+                fprintf(stderr, "[line %d] Error at ')': Expect expression.", parser_previous().line);
+                fflush(stderr);
+                exit(65);                
+            }
+
+            call->as.call.arguments = arguments;
+            call->as.call.arg_count = arg_count;
+
+            return call;
+        }
+        else return make_literal_expr(parser_previous());
+    }
+    if (parser_match(LEFT_PAREN)) {
+        expr* expression =  parse_expression();
+
+        if (parser_match(RIGHT_PAREN)) return make_grouping_expr(expression);
+
+        free_expr(expression);
+        fprintf(stderr, "[line %d] Error at ')': Expect expression.", parser_previous().line);
+        fflush(stderr);
+        exit(65);
+    }
+
+    token current = parser_peek();
+    if (current.type == TOKEN_EOF) {
+        fprintf(stderr, "Error: Unexpected end of input\n");
+    } else {
+        fprintf(stderr, "[line %d] Error: Unexpected token '%s'\n", 
+                current.line, current.symbol ? current.symbol : "unknown");
+    }
+    fflush(stderr);
+    exit(65);
+}
+
+
+==== END: src/expression_parser.c ====
+
+==== BEGIN: src/statement_parser.c ====
+#include "parser.h"
+
+stmt* declaration() {
+    if (parser_match(VAR)) return var_declaration();
+    return statement();
+}
+
+stmt* statement() {
+    if (parser_match(PRINT)) return print_statement();
+    if (parser_match(LEFT_BRACE)) return block();
+    if (parser_match(IF)) return if_statement();
+    if (parser_match(WHILE)) return while_statement();
+    if (parser_match(FOR)) return for_statement();
+    if (parser_match(FUN)) return fun_def_statement();
+    if (parser_match(RETURN)) return return_statement();
+
+    return expression_statement();
+}
+
+stmt* expression_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_EXPR;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    output->as.expr_stmt_var.expression = parse_expression();
+
+    if (!parser_match(SEMICOLON)) {
+        fprintf(stderr, "[line %d] Expect ';' after expression.", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    return output;
+}
+
+stmt* print_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_PRINT;
+    
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    output->as.print_stmt_var.expression = parse_expression();
+    
+    if (!parser_match(SEMICOLON)) {
+        fprintf(stderr, "[line %d] Expect ';' after expression.", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+    
+    return output;
+}
+
+stmt* var_declaration() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_VAR;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    if (!parser_match(IDENTIFIER)) {
+        fprintf(stderr, "[line %d] No Identifier.", parser_peek().line);
+        fflush(stderr); 
+        exit(70);       
+    }
+
+    output->as.var_stmt_var.tkn = parser_previous();
+    expr* initializer = NULL;
+
+    if (parser_match(EQUAL)) initializer = parse_expression();
+
+    if (!parser_match(SEMICOLON)) {
+        fprintf(stderr, "[line %d] Expect ';' after expression.", parser_peek().line);
+        fflush(stderr);
+        exit(70); 
+    }
+    
+    output->as.var_stmt_var.initializer = initializer;
+    return output;
+}
+
+
+stmt* block() {
+    int size = 0;
+    int capacity = 1;
+    stmt** statements = malloc(capacity * sizeof(stmt*));
+
+    if (!statements) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    while (!parser_check(RIGHT_BRACE) && !parser_is_at_end()) {
+        if (size >= capacity) {
+            capacity = 2 * capacity;
+            statements = realloc(statements, capacity * sizeof(stmt*));
+        }
+
+        statements[size++] = declaration();
+    }
+
+    if (parser_is_at_end()) {
+        fprintf(stderr, "[line %d] Expected '}' after block.", parser_peek().line);
+        fflush(stderr);
+        exit(65);
+    }
+    
+    parser_advance();
+    
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_BLOCK;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    output->as.blk_stmt_var.count = size;
+    output->as.blk_stmt_var.statements = statements;
+
+    return output;
+}
+
+stmt* if_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_IF;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+    
+    if (!parser_match(LEFT_PAREN)) {
+        fprintf(stderr, "[line %d] Expected '(' after if.", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    output->as.if_stmt_var.condition = parse_expression();
+
+    if (!parser_match(RIGHT_PAREN)) {
+        fprintf(stderr, "[line %d] Expected ')' after if condition.", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    output->as.if_stmt_var.then_branch = declaration();
+
+    if (parser_match(ELSE)) output->as.if_stmt_var.else_branch = declaration();
+    else output->as.if_stmt_var.else_branch = NULL;
+
+    return output;
+}
+
+stmt* while_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_WHILE;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+    
+    if (!parser_match(LEFT_PAREN)) {
+        fprintf(stderr, "[line %d] Expected '(' after while.", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    output->as.while_stmt_var.condition = parse_expression();
+
+    if (!parser_match(RIGHT_PAREN)) {
+        fprintf(stderr, "[line %d] Expected ')' after while condition.", parser_peek().line);
+        fflush(stderr);exit(70);
+        exit(70);
+    }
+
+    output->as.while_stmt_var.body = declaration();
+
+    return output;
+}
+
+stmt* for_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_FOR;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+    
+    if (!parser_match(LEFT_PAREN)) {
+        fprintf(stderr, "[line %d] Expected '(' after for.", parser_peek().line);
+        fflush(stderr);
+        free_statement(output);
+        exit(70);
+    }
+
+    if (parser_match(SEMICOLON)) {
+        output->as.for_stmt_var.init_condition = NULL;
+    } else if (parser_match(VAR)) {
+        stmt* var_stmt = malloc(sizeof(stmt));
+        if (!var_stmt) {
+            fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+            fflush(stderr);
+            free_statement(output);
+            exit(70);
+        }
+        var_stmt->type = STMT_VAR;
+
+        if (!parser_match(IDENTIFIER)) {
+            fprintf(stderr, "[line %d] No Identifier.", parser_peek().line);
+            fflush(stderr);
+            free_statement(output); 
+            exit(70);       
+        }
+
+        var_stmt->as.var_stmt_var.tkn = parser_previous();
+        expr* initializer = NULL;
+
+        if (parser_match(EQUAL)) initializer = parse_expression();
+
+        if (!parser_match(SEMICOLON)) {
+            fprintf(stderr, "[line %d] Expect ';' after variable declaration.", parser_peek().line);
+            fflush(stderr);
+            free_statement(output);
+            exit(70); 
+        }
+        
+        var_stmt->as.var_stmt_var.initializer = initializer;
+        output->as.for_stmt_var.init_condition = var_stmt;
+    } else {
+        output->as.for_stmt_var.init_condition = expression_statement();
+    }
+
+    if (parser_check(SEMICOLON)) {
+        output->as.for_stmt_var.loop_condition = NULL;
+    } else {
+        stmt* condition_stmt = malloc(sizeof(stmt));
+        if (!condition_stmt) {
+            fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+            fflush(stderr);
+            free_statement(output);
+            exit(70);
+        }
+        condition_stmt->type = STMT_EXPR;
+        condition_stmt->as.expr_stmt_var.expression = parse_expression();
+        output->as.for_stmt_var.loop_condition = condition_stmt;
+    }
+    
+    if (!parser_match(SEMICOLON)) {
+        fprintf(stderr, "[line %d] Expected ';' after for condition.", parser_peek().line);
+        fflush(stderr);
+        free_statement(output);
+        exit(70);
+    }
+    
+    if (parser_check(RIGHT_PAREN)) output->as.for_stmt_var.change = NULL;
+    else {
+        stmt* change_stmt = malloc(sizeof(stmt));
+        if (!change_stmt) {
+            fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+            fflush(stderr);
+            free_statement(output);
+            exit(70);
+        }
+        change_stmt->type = STMT_EXPR;
+        change_stmt->as.expr_stmt_var.expression = parse_expression();
+        output->as.for_stmt_var.change = change_stmt;
+    }
+    
+    if (!parser_match(RIGHT_PAREN)) {
+        fprintf(stderr, "[line %d] Expected ')' after for clauses.", parser_peek().line);
+        fflush(stderr);
+        free_statement(output);
+        exit(70);
+    }
+
+    output->as.for_stmt_var.body = statement();
+
+    return output;    
+}
+
+stmt* fun_def_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_FUN_DEF;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    if (!parser_match(IDENTIFIER)) {
+        fprintf(stderr, "[line %d] Identifier Required", parser_peek().line);
+        fflush(stderr);
+        exit(70);        
+    } else output->as.fun_def_stmt_var.name = parser_previous();
+
+    if (parser_match(LEFT_PAREN)) {
+        output->as.fun_def_stmt_var.parameters = NULL;
+        output->as.fun_def_stmt_var.param_count = 0;
+
+        while(!parser_check(RIGHT_PAREN) && !parser_is_at_end()) {
+            if (!parser_match(IDENTIFIER)) {
+                fprintf(stderr, "[line %d] Expected parameter name", parser_peek().line);
+                fflush(stderr);
+                exit(70);
+            }
+
+            output->as.fun_def_stmt_var.param_count++;
+            output->as.fun_def_stmt_var.parameters = realloc(
+                    output->as.fun_def_stmt_var.parameters,
+                    output->as.fun_def_stmt_var.param_count * sizeof(token)
+                );
+
+            if (!output->as.fun_def_stmt_var.parameters) {
+                fprintf(stderr, "[line %d] Memory allocation failed for parameters", parser_peek().line);
+                fflush(stderr);
+                exit(70);
+            }
+
+            output->as.fun_def_stmt_var.parameters[output->as.fun_def_stmt_var.param_count - 1] = parser_previous();
+
+            if (!parser_match(COMMA)) break;
+        }
+
+        if (!parser_match(RIGHT_PAREN)) {
+            fprintf(stderr, "[line %d] Expected ')' after parameters", parser_peek().line);
+            fflush(stderr);
+            exit(70);
+        }
+    } else {
+        fprintf(stderr, "[line %d] Expected '(' after function name", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    if (parser_match(LEFT_BRACE)) output->as.fun_def_stmt_var.body = block();
+    else if (parser_match(SEMICOLON)) output->as.fun_def_stmt_var.body = NULL;
+    else {
+        fprintf(stderr, "[line %d] Expected '{' before function body", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    return output;
+}
+
+stmt* return_statement() {
+    stmt* output = malloc(sizeof(stmt));
+    output->type = STMT_RETURN;
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    output->as.return_stmt_var.return_value = parse_expression();
+
+    if (!parser_match(SEMICOLON)) {
+        fprintf(stderr, "[line %d] Expect ';' after expression.", parser_peek().line);
+        fflush(stderr);
+        exit(70); 
+    }
+
+    return output;
+}
+==== END: src/statement_parser.c ====
+
+==== BEGIN: src/parser_helper.c ====
+#include "parser.h"
+
+parser psr;
+
+expr* parsed_token_expression(token_array *t_array) {
+    init_parser(t_array);
+    return parse_expression();
+}
+
+parse_results* parse(token_array *t_array) {
+    init_parser(t_array);
+    
+    int size = 0;
+    int capacity = 64;
+    stmt** statements = malloc(capacity * sizeof(stmt*));
+
+    if (!statements) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    while (!parser_is_at_end()) {
+        if (size >= capacity) {
+            capacity = 2 * capacity;
+            stmt** originals = statements;
+            statements = realloc(statements, capacity * sizeof(stmt*));
+
+            if (!statements) {
+                fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+                fflush(stderr);
+                free_statements(originals);
+                exit(70);
+            }
+        }
+
+        statements[size++] = declaration(); 
+    }
+
+    if (size >= capacity) statements = realloc(statements, (capacity + 1) * sizeof(stmt*));
+    statements[size++] = NULL;
+
+    parse_results* output = malloc(sizeof(parse_results));
+
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", parser_peek().line);
+        fflush(stderr);
+        exit(70);
+    }
+
+    output->count = size;
+    output->statements = statements;
+
+    return output;
+}
+
+void init_parser(token_array *t_array) {
+    psr.t_array = t_array;
+    psr.current = 0;
+}
+
+int parser_is_at_end() {
+    return parser_peek().type == TOKEN_EOF;
+}
+
+token parser_peek() {
+    return psr.t_array->t[psr.current];
+}
+
+token parser_previous() {
+    return psr.t_array->t[psr.current - 1];
+}
+
+token parser_peek_next() {
+    if (!parser_is_at_end()) return psr.t_array->t[psr.current + 1];
+    else return error_token("At the End");
+}
+
+token parser_advance() {
+    if (parser_peek().type != TOKEN_EOF) psr.current++;
+    return parser_previous();
+}
+
+int parser_check(token_type type) {
+    if (parser_is_at_end()) return 0;
+    else return parser_peek().type == type;
+}
+
+int parser_match(token_type type) {
+    if (parser_check(type)) {
+        parser_advance();
+        return 1;
+    } else return 0;
+}
+
+expr* make_literal_expr(token value) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_LITERAL;
+    e->as.literal.value = value;
+    return e;
+}
+
+expr* make_binary_expr(expr* left, token_type operator, expr* right) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_BINARY;
+    e->as.binary.left = left;
+    e->as.binary.operator = operator;
+    e->as.binary.right = right;
+    return e;
+}
+
+expr* make_unary_expr(token_type operator, expr* operand) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_UNARY;
+    e->as.unary.operator = operator;
+    e->as.unary.operand = operand;
+    return e;
+}
+
+expr* make_grouping_expr(expr* expression) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_GROUPING;
+    e->as.grouping.expression = expression;
+    return e;
+}
+
+expr* make_assign_expr(token name, expr* value) {
+    expr* e = malloc(sizeof(expr));
+    e->type = EXPR_ASSIGN;
+    e->as.assign.name = name;
+    e->as.assign.value = value;
+    return e;
+}
+
+expr* make_call_expr(token value) {
+    expr* output = malloc(sizeof(expr));
+    if (!output) {
+        fprintf(stderr, "[line %d] Memory allocation failed", value.line);
+        fflush(stderr);
+        exit(70);
+    }
+    
+    output->type = EXPR_CALL;
+    
+    output->as.call.callee = malloc(sizeof(expr));
+    if (!output->as.call.callee) {
+        fprintf(stderr, "[line %d] Memory allocation failed for callee", value.line);
+        fflush(stderr);
+        free(output);
+        exit(70);
+    }
+    
+    output->as.call.callee->type = EXPR_LITERAL;
+    output->as.call.callee->as.literal.value = value;
+    
+    output->as.call.arguments = NULL;
+    
+    return output;
+}
+
+void free_expr(expr* expression) {
+    if (!expression) return;
+
+    switch (expression->type) {
+        case EXPR_ASSIGN:
+            free_expr(expression->as.assign.value);
+            break;
+        case EXPR_CALL:
+            free_expr(expression->as.call.callee);
+            for (int i = 0; i < expression->as.call.arg_count; i++) 
+                free_expr(expression->as.call.arguments[i]);
+            break;
+        case EXPR_BINARY:
+            free_expr(expression->as.binary.left);
+            free_expr(expression->as.binary.right);
+            break;
+        case EXPR_UNARY:
+            free_expr(expression->as.unary.operand);
+            break;
+        case EXPR_GROUPING:
+            free_expr(expression->as.grouping.expression);
+            break;
+        case EXPR_LITERAL:
+            break;
+        default:
+            break;
+    }
+
+    free(expression);
+}
+
+void print_expr(expr* expression) {
+    if (!expression) {
+        printf("NULL");
+        return;
+    }
+    
+    switch (expression->type) {
+        case EXPR_LITERAL:
+            if (expression->as.literal.value.value) {
+                printf("%s", expression->as.literal.value.value);
+            } else if (expression->as.literal.value.symbol) {
+                printf("%s", expression->as.literal.value.symbol);
+            }
+            break;
+        case EXPR_BINARY:
+            printf("(");
+            switch (expression->as.binary.operator) {
+                case PLUS: printf("+ "); break;
+                case MINUS: printf("- "); break;
+                case STAR: printf("* "); break;
+                case SLASH: printf("/ "); break;
+                case EQUAL_EQUAL: printf("== "); break;
+                case BANG_EQUAL: printf("!= "); break;
+                case GREATER: printf("> "); break;
+                case GREATER_EQUAL: printf(">= "); break;
+                case LESS: printf("< "); break;
+                case LESS_EQUAL: printf("<= "); break;
+                case AND: printf("and "); break;
+                case OR: printf("or "); break;
+                default: printf("? "); break;
+            }
+            print_expr(expression->as.binary.left);
+            printf(" ");
+            print_expr(expression->as.binary.right);
+            printf(")");
+            break;
+        case EXPR_UNARY:
+            printf("(");
+            printf("%s ", (expression->as.unary.operator == MINUS) ? "-" : "!");
+            print_expr(expression->as.unary.operand);
+            printf(")");
+            break;
+        case EXPR_GROUPING:
+            printf("(group ");
+            print_expr(expression->as.grouping.expression);
+            printf(")");
+            break;
+        case EXPR_ASSIGN:
+            printf("(");
+            printf(expression->as.assign.name.symbol);
+            printf(" = ");
+            print_expr(expression->as.assign.value);
+            printf(")");
+            break;
+        case EXPR_CALL:
+            break;
+
+    }
+    fflush(stdout);
+}
+
+void free_statement(stmt* statement) {
+    if (!statement) return;
+
+    switch (statement->type) {
+        case STMT_EXPR:
+            free_expr(statement->as.expr_stmt_var.expression);
+            break;
+
+        case STMT_PRINT:
+            free_expr(statement->as.print_stmt_var.expression);
+            break;
+
+        case STMT_VAR:
+            free_expr(statement->as.var_stmt_var.initializer);
+            break;
+
+        case STMT_BLOCK:
+            for (int i = 0; i < statement->as.blk_stmt_var.count; i++) {
+                free_statement(statement->as.blk_stmt_var.statements[i]);
+            }
+            free(statement->as.blk_stmt_var.statements);
+            break;
+
+        case STMT_IF:
+            free_expr(statement->as.if_stmt_var.condition);
+            free_statement(statement->as.if_stmt_var.then_branch);
+            free_statement(statement->as.if_stmt_var.else_branch);
+            break;
+
+        case STMT_WHILE:
+            free_expr(statement->as.while_stmt_var.condition);
+            free_statement(statement->as.while_stmt_var.body);
+            break;
+
+        case STMT_FOR:
+            free_statement(statement->as.for_stmt_var.init_condition);
+            free_statement(statement->as.for_stmt_var.loop_condition);
+            free_statement(statement->as.for_stmt_var.change);
+            free_statement(statement->as.for_stmt_var.body);
+            break;
+
+        case STMT_FUN_DEF:
+            free_token(&(statement->as.fun_def_stmt_var.name));
+            for (int i = 0; i < statement->as.fun_def_stmt_var.param_count; i++) {
+                free_token(&(statement->as.fun_def_stmt_var.parameters[i]));
+            }
+            free_statement(statement->as.fun_def_stmt_var.body);
+            break;
+
+        case STMT_RETURN:
+            free_expr(statement->as.return_stmt_var.return_value);
+            break;
+    }
+    free(statement);
+}
+
+void free_statements(stmt** statements) {
+    int i = 0;
+    while (statements[i] != NULL) free_statement(statements[i++]);
+
+    free(statements);
+    
+    return;
+}
+
+==== END: src/parser_helper.c ====
+
+==== BEGIN: src/evaluation_helper.c ====
+#include "evaluate.h"
+
+int is_truthy(token tkn) {
+    if (tkn.type == FALSE || tkn.type == NIL) return 0;
+    else return 1;
+}
+
+int token_equals(token left, token right) {
+    if (left.type != right.type) return 0;
+    
+    switch (left.type) {
+    case NIL:
+    case TRUE:
+    case FALSE:
+        return 1;
+        break;
+    case NUMBER:
+    case STRING:
+        if (left.value && right.value) return strcmp(left.value, right.value) == 0;
+        return 0;
+        break;
+    case IDENTIFIER:
+        if (left.symbol && right.symbol) return strcmp(left.symbol, right.symbol) == 0;
+        return 0;
+        break;
+    default:
+        return 0;
+        break;
+    }
+
+    return 0;
+}
+
+double token_to_double(token tkn) {
+    if (tkn.type == NUMBER && tkn.value) return atof(tkn.value);
+    return 0.0;
+}
+
+token make_number_token(double value) {
+    token tkn;
+    tkn.type = NUMBER;
+    tkn.line = 0;
+    tkn.symbol = NULL;
+
+    char raw[64];
+    snprintf(raw, sizeof(raw), "%f", value);
+
+    int len = strlen(raw);
+    int i;
+
+    for (i = len - 1; i > 0 && raw[i] == '0'; i--) raw[i] = '\0';
+
+    if (raw[i] == '.') raw[i] = '\0';
+
+    tkn.value = malloc(strlen(raw) + 1);
+    if (tkn.value) strcpy(tkn.value, raw);
+
+    return tkn;
+}
+
+token make_boolean_token(int is_true) {
+    token t;
+    t.type = is_true ? TRUE : FALSE;
+    t.line = 0;
+    t.value = is_true ? "true" : "false";
+    t.symbol = is_true ? "true" : "false";
+    return t;
+}
+==== END: src/evaluation_helper.c ====
+
+==== BEGIN: src/execute_statements.c ====
+#include "execute.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+static token return_value_global;
+static int has_returned = 0;
+
+void interpret(parse_results* parsed_tokens) {
+    if (!parsed_tokens || !parsed_tokens->statements) {
+        fprintf(stderr, "Error: No statements to execute\n");
+        return;
+    }
+    
+    if (!init_universe()) {
+        fprintf(stderr, "Error: Universe not initialized\n");
+        fflush(stderr);
+        exit(70);
+    }
+
+    stmt** statements = parsed_tokens->statements;
+    for (int i = 0; statements[i] != NULL; i++) {
+        execute_statement(statements[i]);
+    }
+}
+
+void execute_statement(stmt* statement) {
+    if (!statement || has_returned) return;
+    
+    switch (statement->type) {
+        case STMT_EXPR: {
+            token result = evaluate_expression(statement->as.expr_stmt_var.expression);
+            // free_token(&result);
+            break;
+        }
+        
+        case STMT_PRINT: {
+            token result = evaluate_expression(statement->as.expr_stmt_var.expression);
+            print_token(result);
+            // free_token(&result);
+            break;
+        }
+
+        case STMT_VAR: {
+            value val;
+            if (statement->as.var_stmt_var.initializer != NULL) {
+                token init_token = evaluate_expression(statement->as.var_stmt_var.initializer);
+                val = token_to_value(init_token);
+                free_token(&init_token);
+            } else {
+                val = create_nil_value();
+            }
+            define_variable(statement->as.var_stmt_var.tkn.symbol, val);
+            free_value(val);
+            break;
+        }
+
+        case STMT_BLOCK:
+            execute_block(statement->as.blk_stmt_var.statements,
+                        statement->as.blk_stmt_var.count);
+            break;
+
+        case STMT_IF:
+            execute_if(statement);  
+            break;
+
+        case STMT_WHILE:
+            execute_while(statement);
+            break;
+
+        case STMT_FOR:
+            execute_for(statement);
+            break;
+
+        case STMT_FUN_DEF:
+            execute_function_def(statement);
+            break;
+
+        case STMT_RETURN:
+            execute_return(statement);
+            break;
+
+        default:
+            fprintf(stderr, "Warning: Unknown statement type\n");
+            break;
+    }
+}
+
+void print_token(token tkn) {
+    switch (tkn.type) {
+        case NUMBER:
+        case STRING:
+            if (tkn.value) {
+                printf("%s\n", tkn.value);
+            } else {
+                printf("nil\n");
+            }
+            break;
+        case TRUE: 
+            printf("true\n"); 
+            break;
+        case FALSE: 
+            printf("false\n"); 
+            break;
+        case NIL: 
+            printf("nil\n"); 
+            break;
+        default: 
+            printf("Unable to print.\n"); 
+            break;
+    }
+    fflush(stdout);
+}
+
+void print_value(value val) {
+    switch (val.type) {
+        case VAL_NUMBER:
+            printf("%.6g\n", val.as.number);
+            break;
+        case VAL_STRING:
+            if (val.as.string) {
+                printf("%s\n", val.as.string);
+            } else {
+                printf("nil\n");
+            }
+            break;
+        case VAL_BOOLEAN:
+            printf("%s\n", val.as.boolean ? "true" : "false");
+            break;
+        case VAL_NIL:
+            printf("nil\n");
+            break;
+        case VAL_FUNCTION:
+            printf("[function]\n");
+            break;
+        default:
+            printf("Unable to print.\n");
+            break;
+    }
+    fflush(stdout);
+}
+
+void define_variable(char* name, value val) {
+    if (!name) {
+        fprintf(stderr, "Error: Cannot define variable with null name\n");
+        return;
+    }
+    
+    if (!univ || univ->count == 0) {
+        fprintf(stderr, "Error: No environment available for variable definition\n");
+        return;
+    }
+    
+    environment* current_env = univ->env[univ->count - 1];
+    
+    for (int j = 0; j < current_env->count; j++) {
+        if (strcmp(current_env->vars[j].name, name) == 0) {
+            free_value(current_env->vars[j].val);
+            current_env->vars[j].val = copy_value(val);
+            return;
+        }
+    }
+    
+    if (append_variable(name, val) != 0) {
+        fprintf(stderr, "Error: Failed to define variable '%s'\n", name);
+        exit(70);
+    }
+}
+
+void assign_variable(char* name, value val) {
+    if (!name) {
+        fprintf(stderr, "Error: Cannot assign to variable with null name\n");
+        return;
+    }
+    
+    if (!univ) {
+        fprintf(stderr, "Error: No universe available for variable assignment\n");
+        return;
+    }
+    
+    for (int i = univ->count - 1; i >= 0; i--) {
+        environment* env = univ->env[i];
+        
+        for (int j = 0; j < env->count; j++) {
+            if (strcmp(env->vars[j].name, name) == 0) {
+                free_value(env->vars[j].val);
+                env->vars[j].val = copy_value(val);
+                return;
+            }
+        }
+    }
+    
+    fprintf(stderr, "Error: Undefined variable '%s' in assignment\n", name);
+    fflush(stderr);
+    exit(70);
+}
+
+void execute_block(stmt** statements, int count) {
+    if (!statements || count <= 0) return;
+    
+    environment* env = init_environment();
+    if (!env) {
+        fprintf(stderr, "Error: Failed to create block environment\n");
+        fflush(stderr);
+        exit(70);
+    }
+
+    if (push_environment(env) != 0) {
+        fprintf(stderr, "Error: Failed to push environment to universe\n");
+        free_environment(env);
+        fflush(stderr);
+        exit(70);
+    }
+
+    for (int i = 0; i < count && !has_returned; i++) {  // Check for return
+        if (statements[i]) {
+            execute_statement(statements[i]);
+        }
+    }
+    
+    environment* popped = pop_environment();
+    free_environment(popped);
+}
+
+void execute_if(stmt* statement) {
+    if (!statement) return;
+    
+    token condition = evaluate_expression(statement->as.if_stmt_var.condition);
+    int is_true = is_truthy(condition);
+    free_token(&condition);
+    
+    if (is_true) {
+        execute_statement(statement->as.if_stmt_var.then_branch);
+    } else if (statement->as.if_stmt_var.else_branch != NULL) {
+        execute_statement(statement->as.if_stmt_var.else_branch);
+    }
+}
+
+void execute_while(stmt* statement) {
+    if (!statement) return;
+    
+    while (1) {    
+        token condition = evaluate_expression(statement->as.while_stmt_var.condition);
+        int is_true = is_truthy(condition);
+        free_token(&condition);
+        
+        if (!is_true) break;
+
+        execute_statement(statement->as.while_stmt_var.body);
+    }
+}
+
+void execute_for(stmt* statement) {
+    if (!statement) return;
+    
+    if (statement->as.for_stmt_var.init_condition != NULL) {
+        execute_statement(statement->as.for_stmt_var.init_condition);
+    }
+
+    while (1) {
+        if (statement->as.for_stmt_var.loop_condition != NULL) {
+            token condition = evaluate_expression(
+                statement->as.for_stmt_var.loop_condition->as.expr_stmt_var.expression
+            );
+            int is_true = is_truthy(condition);
+            free_token(&condition);
+            
+            if (!is_true) break;
+        }
+
+        execute_statement(statement->as.for_stmt_var.body);
+        
+        if (statement->as.for_stmt_var.change != NULL) {
+            execute_statement(statement->as.for_stmt_var.change);
+        }
+    }
+}
+
+void execute_function_def(stmt* statement) {
+    if (!statement) return;
+    
+    token name_token = statement->as.fun_def_stmt_var.name;
+    if (!name_token.symbol) {
+        fprintf(stderr, "Error: Function definition missing name\n");
+        return;
+    }
+    
+    value func_val = create_function_value(statement);
+    define_variable(name_token.symbol, func_val);
+    free_value(func_val);
+}
+
+token call_function(token callee, token* arguments, int arg_count) {
+    if (!callee.symbol) {
+        fprintf(stderr, "Error: Invalid function token\n");
+        fflush(stderr);
+        exit(70);
+    }
+
+    value func_val = get_variable_value(callee.symbol);
+
+    stmt* function_stmt = func_val.as.function;
+    int param_count = function_stmt->as.fun_def_stmt_var.param_count;
+
+    if (function_stmt->type != STMT_FUN_DEF) {
+        fprintf(stderr, "Error: Invalid function statement type\n");
+        fflush(stderr);
+        exit(70);
+    }
+    
+    token* parameters = function_stmt->as.fun_def_stmt_var.parameters;
+
+    if (arg_count != param_count) {
+        fprintf(stderr, "Error: Invalid Number of Parameters\n");
+        fflush(stderr);
+        exit(65);
+    }
+
+    environment* env = init_environment();
+    if (!env) {
+        fprintf(stderr, "Error: Failed to create function environment\n");
+        fflush(stderr);
+        exit(70);
+    }
+    
+    if (push_environment(env) != 0) {
+        fprintf(stderr, "Error: Failed to push function environment\n");
+        free_environment(env);
+        fflush(stderr);
+        exit(70);
+    }
+
+    for (int i = 0; i < param_count; i++) {
+        if (parameters[i].symbol && i < arg_count) {
+            value arg_value = token_to_value(arguments[i]);
+            define_variable(parameters[i].symbol, arg_value);
+            free_value(arg_value);
+        }
+    }
+    
+    reset_return_state();
+    
+    if (function_stmt->as.fun_def_stmt_var.body) 
+        execute_statement(function_stmt->as.fun_def_stmt_var.body);
+    
+    token return_value;
+    if (has_function_returned()) {
+        return_value = get_return_value();
+    } else {
+        return_value.type = NIL;
+        return_value.value = malloc(4);
+        if (return_value.value) {
+            strcpy(return_value.value, "nil");
+            return_value.symbol = return_value.value;
+        } else {
+            return_value.symbol = NULL;
+        }
+        return_value.line = 0;
+    }
+
+    environment* popped = pop_environment();
+    free_environment(popped);
+
+    // FIXED: Don't free func_val - it's managed by the environment
+    free_value(func_val);  // REMOVED
+
+    return return_value;
+}
+
+void execute_return(stmt* statement) {
+    if (!statement) return;
+    
+    if (statement->as.return_stmt_var.return_value) {
+        return_value_global = evaluate_expression(statement->as.return_stmt_var.return_value);
+    } else {
+        return_value_global.type = NIL;
+        return_value_global.value = malloc(4);
+        if (return_value_global.value) {
+            strcpy(return_value_global.value, "nil");
+            return_value_global.symbol = return_value_global.value;
+        } else {
+            return_value_global.symbol = NULL;
+        }
+        return_value_global.line = 0;
+    }
+    
+    has_returned = 1;
+}
+
+int has_function_returned() {
+    return has_returned;
+}
+
+token get_return_value() {
+    token ret = return_value_global;
+    has_returned = 0;
+    return ret;
+}
+
+void reset_return_state() {
+    has_returned = 0;
+}
+
+
+==== END: src/execute_statements.c ====
+
+==== BEGIN: src/evaluate.c ====
+#include "evaluate.h"
+
+token evaluate_expression(expr* expression) {
+    if (!expression) {
+        token error_token;
+        error_token.type = NIL;
+        error_token.value = NULL;
+        error_token.symbol = "nil";
+        error_token.line = 0;
+        return error_token;
+    }
+
+    switch (expression->type) {
+        case EXPR_LITERAL:
+            if (expression->as.literal.value.type == IDENTIFIER) {
+                char* name = expression->as.literal.value.symbol;
+                if (!name) {
+                    fprintf(stderr, "Error: Identifier has no name\n");
+                    fflush(stderr);
+                    exit(70);
+                }
+                
+                value var_val = get_variable_value(name);                
+                return value_to_token(var_val);
+            }            
+            if (expression->as.literal.value.type == NUMBER) {
+                return make_number_token(token_to_double(expression->as.literal.value));
+            }
+            return expression->as.literal.value;
+            break;
+        case EXPR_ASSIGN: 
+            token value_t = evaluate_expression(expression->as.assign.value);
+            value value_v = token_to_value(value_t);
+            assign_variable(expression->as.assign.name.symbol, value_v);
+            free_value(value_v);
+            return value_t;
+            break;
+        case EXPR_CALL:
+            token value = evaluate_expression(expression->as.call.callee);
+            if (!(get_variable_value(value.symbol).type == VAL_FUNCTION)) {
+                fprintf(stderr, "Error: Not a Function");
+                fflush(stderr);
+                exit(70);
+            }
+            int arg_count = expression->as.call.arg_count;
+            token* arguments = malloc(arg_count * sizeof(token));
+            for (int i = 0; i < arg_count; i++) 
+                arguments[i] = evaluate_expression(expression->as.call.arguments[i]);
+            token result = call_function(value, arguments, arg_count);
+            free(arguments);
+            return result;
+            break;
+        case EXPR_BINARY:
+            switch (expression->as.binary.operator) {
+                case AND: {
+                    token left_lA = evaluate_expression(expression->as.binary.left);
+                    if (!is_truthy(left_lA)) return left_lA;
+                    return evaluate_expression(expression->as.binary.right);
+                }
+                case OR: {
+                    token left_lO = evaluate_expression(expression->as.binary.left);
+                    if (is_truthy(left_lO)) return left_lO;
+                    return evaluate_expression(expression->as.binary.right);
+                }
+                default:
+                    break;
+            }
+            
+            token left = evaluate_expression(expression->as.binary.left);
+            token right = evaluate_expression(expression->as.binary.right);
+            
+            switch (expression->as.binary.operator) {
+                case PLUS:
+                    if (left.type == NUMBER && right.type == NUMBER) {
+                        double left_val = token_to_double(left);
+                        double right_val = token_to_double(right);
+                        return make_number_token(left_val + right_val);
+                    } else if (left.type == STRING && right.type == STRING) {
+                        if (left.value && right.value) {
+                            token result;
+                            result.type = STRING;
+                            result.line = 0;
+                            result.symbol = NULL;
+                            
+                            size_t len = strlen(left.value) + strlen(right.value) + 1;
+                            result.value = malloc(len);
+                            strcpy(result.value, left.value);
+                            strcat(result.value, right.value);
+
+                            return result;
+                        }
+                    } else {
+                        fprintf(stderr, "Error must be two Numbers or two Strings for +\n");
+                        exit(70);
+                    }
+                    break;
+                case MINUS:
+                    if (left.type == NUMBER && right.type == NUMBER) {
+                        double left_val = token_to_double(left);
+                        double right_val = token_to_double(right);
+                        return make_number_token(left_val - right_val);
+                    } else {
+                        fprintf(stderr, "Error: Operands must be numbers for -\n");
+                        exit(70);
+                    }
+                    break;
+                case STAR:
+                    if (left.type == NUMBER && right.type == NUMBER) {
+                        double left_val = token_to_double(left);
+                        double right_val = token_to_double(right);
+                        return make_number_token(left_val * right_val);
+                    } else {
+                        fprintf(stderr, "Error: Operands must be numbers for *\n");
+                        exit(70);
+                    }
+                    break;
+                case SLASH:
+                    if (left.type == NUMBER && right.type == NUMBER) {
+                        double left_val = token_to_double(left);
+                        double right_val = token_to_double(right);
+                        if (right_val == 0) {
+                            fprintf(stderr, "Error: Division by zero\n");
+                            exit(65);
+                        }
+                        return make_number_token(left_val / right_val);
+                    } else {
+                        fprintf(stderr, "Error: Operands must be numbers for /\n");
+                        exit(70);
+                    }
+                    break;
+                case GREATER:
+                    if (left.type == NUMBER && right.type == NUMBER) {
+                        double left_val = token_to_double(left);
+                        double right_val = token_to_double(right);
+
+                        return make_boolean_token(left_val > right_val);
+                    } else {
+                        fprintf(stderr, "Error: Operands must be numbers for >\n");
+                        exit(70);
+                    }
+                    break;
+                case GREATER_EQUAL:
+                    if (left.type == NUMBER && right.type == NUMBER) {
+                        double left_val = token_to_double(left);
+                        double right_val = token_to_double(right);
+
+                        return make_boolean_token(left_val >= right_val);
+                    } else {
+                        fprintf(stderr, "Error: Operands must be numbers for >=\n");
+                        exit(70);
+                    }
+                    break;
+                case LESS:
+                    if (left.type == NUMBER && right.type == NUMBER) {
+                        double left_val = token_to_double(left);
+                        double right_val = token_to_double(right);
+
+                        return make_boolean_token(left_val < right_val);
+                    } else {
+                        fprintf(stderr, "Error: Operands must be numbers for <\n");
+                        exit(70);
+                    }
+                    break;
+                case LESS_EQUAL:
+                    if (left.type == NUMBER && right.type == NUMBER) {
+                        double left_val = token_to_double(left);
+                        double right_val = token_to_double(right);
+
+                        return make_boolean_token(left_val <= right_val);
+                    } else {
+                        fprintf(stderr, "Error: Operands must be numbers for <=\n");
+                        exit(70);
+                    }
+                    break;
+                case EQUAL_EQUAL: return make_boolean_token(token_equals(left, right));break;
+                case BANG_EQUAL: return make_boolean_token(!token_equals(left, right));break;
+                default:
+                    fprintf(stderr, "Error: Unknown binary operator\n");
+                    exit(70);
+                    break;
+            }
+            break;
+        case EXPR_UNARY:
+            token operand = evaluate_expression(expression->as.unary.operand);
+            switch (expression->as.unary.operator) {
+                case BANG:
+                    return make_boolean_token(!is_truthy(operand));
+                    break;
+                case MINUS:
+                    if (operand.type == NUMBER) {
+                        double value = token_to_double(operand);
+                        return make_number_token(-value);
+                    } else {
+                        fprintf(stderr, "Error: Operand must be a number for unary minus\n");
+                        exit(70);
+                    }
+                    break;
+                default:
+                    break;
+            }
+            break;
+        case EXPR_GROUPING:
+            return evaluate_expression(expression->as.grouping.expression);
+            break;
+        default:
+            return error_token("Type Error MisMatch (evaluate.c line 235)");
+            break;
+    }
+
+    return error_token("Type Error MisMatch (evaluate.c line 239)");
+}
+==== END: src/evaluate.c ====
+
+==== BEGIN: src/execute_helper.c ====
+#include "execute.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+universe* univ;
+
+// Utility functions for creating values
+value create_nil_value() {
+    value val;
+    val.type = VAL_NIL;
+    return val;
+}
+
+value create_number_value(double num) {
+    value val;
+    val.type = VAL_NUMBER;
+    val.as.number = num;
+    return val;
+}
+
+value create_string_value(const char* str) {
+    value val;
+    val.type = VAL_STRING;
+    if (str) {
+        val.as.string = malloc(strlen(str) + 1);
+        if (val.as.string) {
+            strcpy(val.as.string, str);
+        } else {
+            val.type = VAL_NIL;  // Fallback on allocation failure
+        }
+    } else {
+        val.as.string = NULL;
+        val.type = VAL_NIL;
+    }
+    return val;
+}
+
+value create_boolean_value(int boolean) {
+    value val;
+    val.type = VAL_BOOLEAN;
+    val.as.boolean = boolean ? 1 : 0;
+    return val;
+}
+
+value create_function_value(stmt* function) {
+    value val;
+    val.type = VAL_FUNCTION;
+    val.as.function = function;  // No ownership, just reference
+    return val;
+}
+
+value copy_value(value original) {
+    value copy;
+    copy.type = original.type;
+    
+    switch (original.type) {
+        case VAL_STRING:
+            if (original.as.string) {
+                copy.as.string = malloc(strlen(original.as.string) + 1);
+                if (copy.as.string) {
+                    strcpy(copy.as.string, original.as.string);
+                } else {
+                    copy.type = VAL_NIL;
+                }
+            } else {
+                copy.as.string = NULL;
+            }
+            break;
+        case VAL_NUMBER:
+            copy.as.number = original.as.number;
+            break;
+        case VAL_BOOLEAN:
+            copy.as.boolean = original.as.boolean;
+            break;
+        case VAL_FUNCTION:
+            copy.as.function = original.as.function;
+            break;
+        case VAL_NIL:
+        default:
+            break;
+    }
+    return copy;
+}
+
+value token_to_value(token tkn) {
+    switch (tkn.type) {
+        case NUMBER:
+            return create_number_value(atof(tkn.value));
+        case STRING:
+            return create_string_value(tkn.value);
+        case TRUE:
+            return create_boolean_value(1);
+        case FALSE:
+            return create_boolean_value(0);
+        case NIL:
+        default:
+            return create_nil_value();
+    }
+}
+
+token value_to_token(value val) {
+    token tkn;
+    tkn.line = 0;
+    tkn.value = NULL;
+    tkn.symbol = NULL;
+    
+    switch (val.type) {
+        case VAL_NUMBER:
+            tkn.type = NUMBER;
+            tkn.value = malloc(32);
+            if (tkn.value) {
+                snprintf(tkn.value, 32, "%.6g", val.as.number);
+                tkn.symbol = tkn.value;
+            }
+            break;
+        case VAL_STRING:
+            tkn.type = STRING;
+            if (val.as.string) {
+                tkn.value = malloc(strlen(val.as.string) + 1);
+                if (tkn.value) {
+                    strcpy(tkn.value, val.as.string);
+                    tkn.symbol = tkn.value;
+                }
+            }
+            break;
+        case VAL_BOOLEAN:
+            if (val.as.boolean) {
+                tkn.type = TRUE;
+                tkn.value = malloc(5);
+                if (tkn.value) {
+                    strcpy(tkn.value, "true");
+                    tkn.symbol = tkn.value;
+                }
+            } else {
+                tkn.type = FALSE;
+                tkn.value = malloc(6);
+                if (tkn.value) {
+                    strcpy(tkn.value, "false");
+                    tkn.symbol = tkn.value;
+                }
+            }
+            break;
+        case VAL_FUNCTION:
+            tkn.type = IDENTIFIER;
+            if (val.as.function && val.as.function->as.fun_def_stmt_var.name.symbol) {
+                char* name = val.as.function->as.fun_def_stmt_var.name.symbol;
+                tkn.value = malloc(strlen(name) + 1);
+                if (tkn.value) {
+                    strcpy(tkn.value, name);
+                    tkn.symbol = tkn.value;
+                }
+            }
+            break;
+        case VAL_NIL:
+        default:
+            tkn.type = NIL;
+            tkn.value = malloc(4);
+            if (tkn.value) {
+                strcpy(tkn.value, "nil");
+                tkn.symbol = tkn.value;
+            }
+            break;
+    }
+    return tkn;
+}
+
+token copy_token(token original) {
+    token copy;
+    copy.type = original.type;
+    copy.line = original.line;
+    
+    if (original.value) {
+        copy.value = malloc(strlen(original.value) + 1);
+        if (copy.value) {
+            strcpy(copy.value, original.value);
+            copy.symbol = copy.value;
+        } else {
+            copy.value = NULL;
+            copy.symbol = NULL;
+        }
+    } else {
+        copy.value = NULL;
+        copy.symbol = NULL;
+    }
+    
+    return copy;
+}
+
+void free_value(value val) {
+    switch (val.type) {
+        case VAL_STRING:
+            if (val.as.string) {
+                free(val.as.string);
+            }
+            break;
+        case VAL_FUNCTION:
+            // Don't free the statement, we don't own it
+            break;
+        case VAL_NUMBER:
+        case VAL_BOOLEAN:
+        case VAL_NIL:
+        default:
+            break;
+    }
+}
+
+environment* init_environment() {
+    const int initial_capacity = 8;
+    
+    environment* env = malloc(sizeof(environment));
+    if (!env) return NULL;
+    
+    env->vars = malloc(sizeof(variable) * initial_capacity);
+    if (!env->vars) {
+        free(env);
+        return NULL;
+    }
+    
+    env->count = 0;
+    env->capacity = initial_capacity;
+    return env;
+}
+
+int init_universe() {
+    const int initial_capacity = 4;
+    
+    univ = malloc(sizeof(universe));
+    if (!univ) return 0;
+    
+    univ->env = malloc(sizeof(environment*) * initial_capacity);
+    if (!univ->env) {
+        free(univ);
+        univ = NULL;
+        return 0;
+    }
+    
+    univ->count = 0;
+    univ->capacity = initial_capacity;
+    
+    environment* global_env = init_environment();
+    if (!global_env) {
+        free(univ->env);
+        free(univ);
+        univ = NULL;
+        return 0;
+    }
+    
+    univ->env[0] = global_env;
+    univ->count = 1;
+    
+    return 1;
+}
+
+int push_environment(environment* env) {
+    if (!env || !univ) return -1;
+    
+    if (univ->count >= univ->capacity) {
+        int new_capacity = univ->capacity * 2;
+        environment** new_env = realloc(univ->env, sizeof(environment*) * new_capacity);
+        if (!new_env) return -1;
+        
+        univ->env = new_env;
+        univ->capacity = new_capacity;
+    }
+    
+    univ->env[univ->count] = env;
+    univ->count++;
+    return 0;
+}
+
+environment* pop_environment() {
+    if (!univ || univ->count <= 1) return NULL;  // Keep global environment
+    
+    univ->count--;
+    return univ->env[univ->count];
+}
+
+int append_variable(char* name, value val) {
+    if (!name || !univ || univ->count == 0) return -1;
+    
+    environment* env = univ->env[univ->count - 1];
+    
+    if (env->count >= env->capacity) {
+        int new_capacity = env->capacity * 2;
+        variable* new_vars = realloc(env->vars, sizeof(variable) * new_capacity);
+        if (!new_vars) return -1;
+        
+        env->vars = new_vars;
+        env->capacity = new_capacity;
+    }
+    
+    char* name_copy = malloc(strlen(name) + 1);
+    if (!name_copy) return -1;
+    strcpy(name_copy, name);
+    
+    env->vars[env->count].name = name_copy;
+    env->vars[env->count].val = copy_value(val);  // Always copy to avoid ownership issues
+    env->count++;
+    return 0;
+}
+
+void free_environment(environment* env) {
+    if (!env) return;
+    
+    for (int i = 0; i < env->count; i++) {
+        if (env->vars[i].name) {
+            free(env->vars[i].name);
+        }
+        free_value(env->vars[i].val);
+    }
+    
+    if (env->vars) {
+        free(env->vars);
+    }
+    free(env);
+}
+
+void free_universe() {
+    if (!univ) return;
+    
+    for (int i = 0; i < univ->count; i++) {
+        free_environment(univ->env[i]);
+    }
+    
+    if (univ->env) {
+        free(univ->env);
+    }
+    free(univ);
+    univ = NULL;
+}
+
+value get_variable_value(char* name) {
+    if (!name || !univ) {
+        return create_nil_value();
+    }
+    
+    // Search from most recent environment to global
+    for (int i = univ->count - 1; i >= 0; i--) {
+        environment* env = univ->env[i];
+        
+        for (int j = 0; j < env->count; j++) {
+            if (strcmp(env->vars[j].name, name) == 0) {
+                return copy_value(env->vars[j].val);
+            }
+        }
+    }
+    
+    // Variable not found
+    fprintf(stderr, "Error: Undefined variable '%s'\n", name);
+    fflush(stderr);
+    exit(70);
+}
+
+value get_variable_value_debug(char* name) {
+    printf("DEBUG: Looking for variable '%s'\n", name);
+    printf("DEBUG: Universe count: %d\n", univ ? univ->count : -1);
+    
+    if (!name || !univ) {
+        printf("DEBUG: Null name or universe\n");
+        return create_nil_value();
+    }
+    
+    // Search from most recent environment to global
+    for (int i = univ->count - 1; i >= 0; i--) {
+        environment* env = univ->env[i];
+        printf("DEBUG: Checking environment %d with %d variables\n", i, env->count);
+        
+        for (int j = 0; j < env->count; j++) {
+            printf("DEBUG: Variable %d: '%s'\n", j, env->vars[j].name);
+            if (strcmp(env->vars[j].name, name) == 0) {
+                printf("DEBUG: Found variable '%s'!\n", name);
+                return copy_value(env->vars[j].val);
+            }
+        }
+    }
+    
+    // Variable not found
+    printf("DEBUG: Variable '%s' not found in any environment\n", name);
+    fprintf(stderr, "Error: Undefined variable '%s'\n", name);
+    fflush(stderr);
+    exit(70);
+}
+
+token get_variable(char* name) {
+    value val = get_variable_value(name);
+    return value_to_token(val);
+}
+==== END: src/execute_helper.c ====
+

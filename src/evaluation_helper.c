@@ -66,3 +66,10 @@ token make_boolean_token(int is_true) {
     t.symbol = is_true ? "true" : "false";
     return t;
 }
+
+int is_native_function(char* name) {
+    return (strcmp(name, "clock") == 0 || 
+            strcmp(name, "len") == 0 || 
+            strcmp(name, "input") == 0 || 
+            strcmp(name, "str") == 0);
+}

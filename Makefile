@@ -37,7 +37,7 @@ $(BINDIR):
 
 # Clean build artifacts
 clean:
-	rm -rf $(OBJDIR) $(BINDIR)
+	rm -rf $(OBJDIR) $(BINDIR) gmon.out gprof-report.txt
 
 # Force rebuild
 rebuild: clean all
@@ -58,17 +58,34 @@ debug: $(TARGET)
 release: CFLAGS += -O2 -DNDEBUG
 release: $(TARGET)
 
+# GProf profile build
+profile: CFLAGS += -pg
+profile: LDFLAGS += -pg
+profile: clean $(TARGET)
+
+# Generate gprof report
+gprof-report:
+	gprof $(TARGET) gmon.out > gprof-report.txt
+	cat gprof-report.txt | less
+
+# Clean profiling artifacts
+profile-clean:
+	rm -f gmon.out gprof-report.txt
+
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  all       - Build the project (default)"
-	@echo "  clean     - Remove build artifacts"
-	@echo "  rebuild   - Clean and build"
-	@echo "  debug     - Build with debug symbols"
-	@echo "  release   - Build optimized release version"
-	@echo "  install   - Install to /usr/local/bin/"
-	@echo "  uninstall - Remove from /usr/local/bin/"
-	@echo "  help      - Show this help message"
+	@echo "  all            - Build the project (default)"
+	@echo "  clean          - Remove build artifacts"
+	@echo "  rebuild        - Clean and build"
+	@echo "  debug          - Build with debug symbols"
+	@echo "  release        - Build optimized release version"
+	@echo "  install        - Install to /usr/local/bin/"
+	@echo "  uninstall      - Remove from /usr/local/bin/"
+	@echo "  profile        - Build with gprof profiling support"
+	@echo "  gprof-report   - Generate gprof report from gmon.out"
+	@echo "  profile-clean  - Remove profiling output files"
+	@echo "  help           - Show this help message"
 
 # Phony targets
-.PHONY: all clean rebuild install uninstall debug release help
+.PHONY: all clean rebuild install uninstall debug release help profile gprof-report profile-clean

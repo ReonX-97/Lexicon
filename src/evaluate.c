@@ -11,13 +11,46 @@ token evaluate_expression(expr* expression) {
     }
 
     switch (expression->type) {
-        case EXPR_ASSIGN: {
-            token value = evaluate_expression(expression->as.assign.value);
-            assign_variable(expression->as.assign.name.symbol, value);
-            return value;
-        }
+        case EXPR_LITERAL:
+            if (expression->as.literal.value.type == IDENTIFIER) {
+                char* name = expression->as.literal.value.symbol;
+                if (!name) {
+                    fprintf(stderr, "Error: Identifier has no name\n");
+                    fflush(stderr);
+                    exit(70);
+                }               
+                if (strcmp(name, "clock") == 0 || strcmp(name, "len") == 0 || 
+                    strcmp(name, "input") == 0 || strcmp(name, "str") == 0) {
+                    return expression->as.literal.value;
+                }                
+                value var_val = get_variable_value(name);                
+                return value_to_token(var_val);
+            }            
+            if (expression->as.literal.value.type == NUMBER) {
+                return make_number_token(token_to_double(expression->as.literal.value));
+            }
+            return expression->as.literal.value;
+            break;
+        case EXPR_ASSIGN: 
+            token value_t = evaluate_expression(expression->as.assign.value);
+            value value_v = token_to_value(value_t);
+            assign_variable(expression->as.assign.name.symbol, value_v);
+            free_value(value_v);
+            return value_t;
+            break;
+        case EXPR_CALL:
+            token value = evaluate_expression(expression->as.call.callee);
+            
+            int arg_count = expression->as.call.arg_count;
+            token* arguments = malloc(arg_count * sizeof(token));
+            for (int i = 0; i < arg_count; i++) 
+                arguments[i] = evaluate_expression(expression->as.call.arguments[i]);
+            
+            token result = call_function(value, arguments, arg_count);
+            free(arguments);
+            return result;
+            break;
         case EXPR_BINARY:
-            // Handle short-circuiting operators first
             switch (expression->as.binary.operator) {
                 case AND: {
                     token left_lA = evaluate_expression(expression->as.binary.left);
@@ -33,7 +66,6 @@ token evaluate_expression(expr* expression) {
                     break;
             }
             
-            // For non-short-circuiting operators, evaluate both operands
             token left = evaluate_expression(expression->as.binary.left);
             token right = evaluate_expression(expression->as.binary.right);
             
@@ -54,6 +86,8 @@ token evaluate_expression(expr* expression) {
                             result.value = malloc(len);
                             strcpy(result.value, left.value);
                             strcat(result.value, right.value);
+
+                            result.symbol = result.value;
 
                             return result;
                         }
@@ -169,14 +203,6 @@ token evaluate_expression(expr* expression) {
             break;
         case EXPR_GROUPING:
             return evaluate_expression(expression->as.grouping.expression);
-            break;
-        case EXPR_LITERAL:
-            if (expression->as.literal.value.type == IDENTIFIER) {
-                char* name = expression->as.literal.value.symbol;
-                return get_variable(name);
-            }
-            if (expression->as.literal.value.type == NUMBER) return make_number_token(token_to_double(expression->as.literal.value));
-            return expression->as.literal.value;
             break;
         default:
             return error_token("Type Error MisMatch (evaluate.c line 235)");
