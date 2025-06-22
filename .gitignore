@@ -4,3 +4,5 @@ obj/*
 test/*
 tree.txt
 script.sh
+trace.log
+combined.txt
